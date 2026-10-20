@@ -13,7 +13,26 @@ NAME=${NAME:-spark-stack}
 IMAGE=${IMAGE:-spark-stack:dev}
 PORT=${PORT:-8099}
 WORKER=${WORKER:-valentine@10.10.10.13}
-PUBLIC=${STACK_PUBLIC_HOST:-$(command -v tailscale >/dev/null 2>&1 && tailscale ip -4 2>/dev/null | head -1 || hostname -I | awk "{print \$1}")}
+# The controller holds the host's ssh keys: it may only listen on the tailnet, or on loopback for local-only runs.
+BIND=${STACK_BIND:-}
+if [ -z "$BIND" ]; then
+  BIND=$(command -v tailscale >/dev/null 2>&1 && tailscale ip -4 2>/dev/null | head -1 || true)
+  if [ -z "$BIND" ]; then
+    echo "no tailnet address: 'tailscale ip -4' returned nothing." >&2
+    echo "refusing to fall back to a LAN/WAN interface; start tailscaled or set STACK_BIND to a 100.64.0.0/10 or 127.0.0.0/8 address." >&2
+    exit 2
+  fi
+fi
+case "$BIND" in
+  0.0.0.0|::|"[::]") echo "refusing wildcard bind ($BIND); only tailnet (100.64.0.0/10) or loopback (127.0.0.0/8)" >&2; exit 2 ;;
+esac
+python3 - "$BIND" <<'PY' || { echo "refusing bind $BIND: only tailnet (100.64.0.0/10) or loopback (127.0.0.0/8) is allowed" >&2; exit 2; }
+import ipaddress, sys
+addr = ipaddress.ip_address(sys.argv[1])
+allowed = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("127.0.0.0/8"))
+sys.exit(0 if any(addr in net for net in allowed) else 1)
+PY
+PUBLIC=${STACK_PUBLIC_HOST:-$BIND}
 
 
 case "${1:-run}" in
@@ -44,6 +63,8 @@ case "${1:-run}" in
       -e STACK_WORKER_NAME="${WORKER#*@}" \
       -e STACK_RECIPES="$HOME/spark-stack/vendor" \
       -e STACK_PUBLIC_HOST="$PUBLIC" \
+      -e STACK_BIND="$BIND" \
+      -e STACK_PORT="$PORT" \
       -e STACK_HARNESS_URL="http://$PUBLIC:3080" \
       -e DSH_PATCH="$HOME/.dsh/profiles/web/cordis.patch.yml" \
       -e STACK_TOKEN="$TOKEN" \
@@ -52,7 +73,7 @@ case "${1:-run}" in
       -e STACK_SSH_KNOWN_HOSTS="$HOME/.ssh/known_hosts" \
       "$IMAGE"
     sleep 3
-    echo "UI: http://$PUBLIC:8099/  (token: ~/spark-stack-state/token)"
+    echo "UI: http://$PUBLIC:$PORT/  (bound to $BIND only, token: ~/spark-stack-state/token)"
     docker logs --tail 20 "$NAME"
     ;;
   logs) docker logs -f --tail 100 "$NAME" ;;

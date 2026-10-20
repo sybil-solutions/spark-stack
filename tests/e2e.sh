@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # End-to-end proof for the spark stack, run from the head Spark (or anywhere that reaches it).
-#   ./tests/e2e.sh http://127.0.0.1:8099 glm
+#   ./tests/e2e.sh http://$(tailscale ip -4 | head -1):8099 glm
 # Asserts: state reports both nodes, load brings the OpenAI endpoint up, a completion returns tokens,
 # stats report the active model, and unload takes it down again.
 set -euo pipefail
-API=${1:-http://127.0.0.1:8099}
+HEAD_BIND=${STACK_BIND:-$(tailscale ip -4 2>/dev/null | head -1 || true)}
+API=${1:-http://${HEAD_BIND:-127.0.0.1}:8099}
 MODEL=${2:-glm}
 ENDPOINT_HOST=${ENDPOINT_HOST:-127.0.0.1}
 TOKEN=${TOKEN:?set TOKEN to the stack token}  # ~/spark-stack-state/token on the head

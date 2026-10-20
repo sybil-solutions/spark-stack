@@ -3,7 +3,7 @@
 # then let the stack prepare DeepSeek. Runs on the head; the token stays on the host.
 set -u
 T=$(cat "$HOME/spark-stack-state/token")
-API=http://127.0.0.1:8099
+API="http://${STACK_BIND:-$(tailscale ip -4 2>/dev/null | head -1)}:8099"
 api() { curl -s -m 30 -H "Authorization: Bearer $T" "$@"; }
 status_of() {
   api "$API/api/state" | python3 -c "import json,sys;print(next(m['status'] for m in json.load(sys.stdin)['models'] if m['key']=='$1'))"

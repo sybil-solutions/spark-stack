@@ -36,10 +36,15 @@ mkdir -p vendor && (cd vendor && \
 WORKER=valentine@10.10.10.13 ./deploy.sh run     # worker's fabric address
 ```
 
-Open `http://<head>:8099` and paste the token from `~/spark-stack-state/token` (the controller holds the host's
+Open `http://<tailnet-ip>:8099` and paste the token from `~/spark-stack-state/token` (the controller holds the host's
 ssh keys, so every `/api` call needs it). The UI has four panes, matching the wireframes: **connect** (the two nodes and the
 fabric link), **hardware** (per-node facts), **models** (three cards: load / free / fetch / log), **running**
 (endpoint, live counters, node memory).
+
+The listener is bound to **one interface** — `tailscale ip -4` on the head, so `http://<tailnet-ip>:8099` only.
+`deploy.sh` and the entrypoint fail closed: no tailnet address means no start (they never fall back to a LAN/WAN
+interface), and `STACK_BIND` is accepted only for `100.64.0.0/10` (tailnet) or `127.0.0.0/8` (loopback). `0.0.0.0`
+is refused. The LAN (`192.168.0.x`), the fabric (`10.10.10.x`) and the WAN never answer on 8099.
 
 `wire harness` writes the three providers into `~/.dsh/profiles/web/cordis.patch.yml` and prints the YAML it wrote.
 
@@ -73,7 +78,7 @@ All `/api` routes require `Authorization: Bearer $(cat ~/spark-stack-state/token
 ## Verified on spark-2384 (head) + spark-557f (worker)
 
 ```
-$ TOKEN=$(cat ~/spark-stack-state/token) bash tests/e2e.sh http://127.0.0.1:8099 glm
+$ TOKEN=$(cat ~/spark-stack-state/token) bash tests/e2e.sh http://$(tailscale ip -4 | head -1):8099 glm
 == state
   head   spark-2384 reachable 11 GiB
   worker 10.10.10.13 reachable 14 GiB
