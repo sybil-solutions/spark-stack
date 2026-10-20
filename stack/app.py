@@ -127,13 +127,15 @@ def node_facts(target: str) -> dict:
 
 # ------------------------------------------------------------------ actions
 def derive_status(status: str, up: bool, job) -> str:
-    """The endpoint is the truth: a finished load that answers is running, a finished stop is ready."""
+    """The endpoint is the truth: a finished load that answers is running, a finished stop that is down is ready."""
     if up:
         return "running"
-    if status in ("loading", "unloading") and (not job or job.done):
-        if job and job.rc not in (0, None):
-            return "error"
-        return "ready"
+    if status == "unloading" and (not job or job.done):
+        return "ready"          # a stop that leaves nothing listening did its job, whatever its exit code
+    if status == "preparing" and job and job.done:
+        return "ready" if job.rc == 0 else "error"
+    if status == "loading" and job and job.done and job.rc not in (0, None):
+        return "error"
     return status
 
 
@@ -231,6 +233,8 @@ def api_unload(key: str) -> dict:
     m = MODELS.get(key)
     if not m:
         raise HTTPException(404, "unknown model")
+    if host.job(key) and not host.job(key).done:
+        raise HTTPException(409, f"{m.name}: {host.job(key).action} already running")
     cmd = f"cd {recipe_path(key)} && WORKER={WORKER} {m.stop}"
     job = host.spawn(key, "stop", cmd, timeout=900)
     set_model_state(key, status="unloading")
