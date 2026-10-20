@@ -94,6 +94,8 @@ $ TOKEN=$(cat ~/spark-stack-state/token) bash tests/e2e.sh http://$(tailscale ip
 PASS
 ```
 
+Qwen passes the same way (`tests/e2e.sh … qwen`: 31 tokens, `stack ok`, unload down).
+
 `tests/harness.sh` passes too: `dsh 0.2.1-rc.2` is in the image, the patch keeps the user's existing routes and adds
 `spark-glm`, `spark-qwen`, `spark-deepseek`.
 
@@ -109,3 +111,15 @@ PASS
 the worker over the fabric) and stops there. **DeepSeek is not fetched automatically** — press `fetch` on its card.
 Its download is 462 GB resident: 240 GB of EXL3 banks plus 222 GB of base shards, ~203 GB of which arrives as
 `.partNN` files that reassemble into the two Engram shards and are deleted; peak disk while reassembling is ~665 GB.
+
+## A local image can be a trap
+
+`prepare.sh` accepts any locally built image whose tag matches, and only checks the tag — it does not know whether
+that build loads. On 2026-10-20 an image rebuilt that morning passed `prepare.sh` ("kernel set present") and then
+died at load with `tensorfold-native … (LinkReadFailed)`, while the six-day-old build still served. Two ways out,
+both wired into the UI:
+
+```
+POST /api/models/{id}/prepare?mode=pull      # PULL=1: take the published GHCR image instead of the local build
+POST /api/models/{id}/prepare?mode=rebuild   # prepare.sh --rebuild: rebuild with the pinned patches
+```

@@ -249,6 +249,7 @@ function renderModels() {
         <button class="act primary" ${canLoad && !busy ? '' : 'disabled'} onclick="act('${m.key}','load')">load</button>
         <button class="act" ${canFree && !busy ? '' : 'disabled'} onclick="act('${m.key}','unload')">free</button>
         <button class="act" ${busy ? 'disabled' : ''} onclick="act('${m.key}','prepare')">fetch</button>
+        ${m.kind === 'tensorfold' ? `<button class="act" ${busy ? 'disabled' : ''} onclick="act('${m.key}','prepare','?mode=rebuild')">rebuild image</button>` : ''}
         <button class="act" onclick="logs('${m.key}')">log</button>
       </div>
       <pre class="log" id="log-${m.key}" hidden></pre>
@@ -288,8 +289,8 @@ async function pollStats() {
   renderRunning();
 }
 
-async function act(key, what) {
-  const r = await api(`/api/models/${key}/${what}`, { method: 'POST' });
+async function act(key, what, query = '') {
+  const r = await api(`/api/models/${key}/${what}${query}`, { method: 'POST' });
   if (!r.ok) alert((await r.json()).detail || r.statusText);
   setTimeout(refresh, 1200);
 }

@@ -195,7 +195,7 @@ def api_state() -> dict:
 
 
 @app.post("/api/models/{key}/prepare")
-def api_prepare(key: str) -> dict:
+def api_prepare(key: str, mode: str = "auto") -> dict:
     m = MODELS.get(key)
     if not m:
         raise HTTPException(404, "unknown model")
@@ -203,7 +203,12 @@ def api_prepare(key: str) -> dict:
         raise HTTPException(409, f"{m.name}: {host.job(key).action} already running")
     if endpoint_up(m.port):
         raise HTTPException(409, f"{m.name} is already serving")
-    cmd = f"cd {recipe_path(key)} && export WORKER={WORKER} && {m.prepare}"
+    body = m.prepare
+    if m.kind == "tensorfold" and mode == "rebuild":
+        body = f"PULL=0 {m.prepare} --rebuild"     # a local tag can be stale or broken; rebuild it
+    elif m.kind == "tensorfold" and mode == "pull":
+        body = f"PULL=1 {m.prepare}"               # prefer the published image over a local build
+    cmd = f"cd {recipe_path(key)} && export WORKER={WORKER} && {body}"
     job = host.spawn(key, "prepare", cmd, timeout=6 * 3600)
     set_model_state(key, status="preparing", last=f"prepare started {time.strftime('%H:%M:%S')}")
     return {"ok": True, "job": job.log}
@@ -241,6 +246,23 @@ def api_unload(key: str) -> dict:
     if load_state().get("active") == key:
         set_active(None)
     return {"ok": True, "job": job.log}
+
+
+@app.post("/api/models/{key}/reset")
+def api_reset(key: str) -> dict:
+    """Forget a killed job and re-derive the status from the endpoint (nothing is started or stopped)."""
+    m = MODELS.get(key)
+    if not m:
+        raise HTTPException(404, "unknown model")
+    with host._lock:
+        host.jobs.pop(key, None)
+    up = endpoint_up(m.port)
+    set_model_state(key, status="running" if up else "ready", last=f"reset {time.strftime('%H:%M:%S')}")
+    if up:
+        set_active(key)
+    elif load_state().get("active") == key:
+        set_active(None)
+    return {"ok": True, "up": up}
 
 
 @app.get("/api/models/{key}/logs")
