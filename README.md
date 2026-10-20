@@ -69,8 +69,9 @@ All `/api` routes require `Authorization: Bearer $(cat ~/spark-stack-state/token
 - **DeepSeek is the 1017 2.7 bpw pair**: `0xSero/DeepSeek-V4.1-Flash-1017-EXL3-2.7bpw` (199 GB, 2.70 bpw) served by
   sudoingX's launcher at `cc59c360` with the pinned `ghcr.io/sybil-solutions/deepseek-v4.1-flash-exl3-spark` image.
   The Engram tables are not in the checkpoint: `scripts/fetch-dsv41-1017.py` pulls DeepSeek's two shards at
-  `1bae0e10` into the same directory and verifies `MANIFEST.sha256`. Nothing is fetched until the card's `fetch` is
-  pressed.
+  `1bae0e10` into the same directory, verifies `MANIFEST.sha256`, then rsyncs the whole verified tree to `$WORKER`
+  over the fabric and runs `sha256sum -c` there too, because the pinned launcher reads `MODEL_DIR` on both ranks.
+  `--sync-only` re-copies without downloading. Nothing is fetched until the card's `fetch` is pressed.
 - Weights are prepared by each recipe's own `prepare.sh`/`download.sh`, which verify hashes and copy to the worker
   over the fabric.
 - The controller never writes into the recipe trees; state and job logs live in `~/spark-stack-state/`.
