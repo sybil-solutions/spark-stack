@@ -26,9 +26,16 @@ class Model:
     notes: str = ""
     env: dict[str, str] = field(default_factory=dict)
 
-    def load_command(self, worker: str, port: int) -> str:
+    def command(self, script: str, worker: str, port: int) -> str:
+        """WORKER plus this model's env, then the script: stop needs the same surroundings as start."""
         env = " ".join(f"{k}={v}" for k, v in self.env.items())
-        return f"WORKER={worker} {env} {self.start}".replace("{port}", str(port))
+        return f"WORKER={worker} {env} {script}".replace("{port}", str(port))
+
+    def load_command(self, worker: str, port: int) -> str:
+        return self.command(self.start, worker, port)
+
+    def stop_command(self, worker: str, port: int) -> str:
+        return self.command(self.stop, worker, port)
 
 
 MODELS: dict[str, Model] = {
@@ -68,20 +75,27 @@ MODELS: dict[str, Model] = {
     ),
     "deepseek": Model(
         key="deepseek",
-        name="DeepSeek-V4.1-Flash",
-        recipe="deepseek",
+        name="DeepSeek-V4.1-Flash-1017",
+        recipe="dsv41-1017",
         kind="vllm",
-        checkpoint="0xSero/DeepSeek-V4.1-Flash-Spark",
-        revision="main",
+        checkpoint="0xSero/DeepSeek-V4.1-Flash-1017-EXL3-2.7bpw",
+        revision="e34ef55b",
         port=8000,
-        api_id="deepseek-v4.1-flash",
+        api_id="deepseek-v4.1-flash-1017",
         context=262_144,
-        vision=True,
-        size_gib=462,  # 240 GB EXL3 banks + 222 GB base/Engram shards; ~665 GB peak while reassembling
-        prepare="./scripts/download.sh && ./scripts/copy-to-peer.sh",
-        start="./scripts/launch.sh",
-        stop="./scripts/launch.sh stop",
-        api_key_file="~/.dsv41-two-sparks/api_key",
-        notes="0xSero two-Spark recipe, EXL3 2.77 bpw, vLLM + B12X kernels",
+        vision=False,           # the launcher is text-only by default (TEXT_ONLY=1)
+        size_gib=402,           # 199 GB checkpoint + 203 GB of DeepSeek's own Engram shards
+        prepare="MODEL_DIR=$HOME/models/dsv41-1017-exl3 python3 ~/spark-stack/scripts/fetch-dsv41-1017.py",
+        start="scripts/launch/dsv41_tp2.sh up",
+        stop="scripts/launch/dsv41_tp2.sh down",
+        notes="sudoxing launcher cc59c360 + ghcr.io/sybil-solutions/deepseek-v4.1-flash-exl3-spark@sha256:5817414f",
+        env={
+            "IMAGE": "ghcr.io/sybil-solutions/deepseek-v4.1-flash-exl3-spark@sha256:5817414f92e9bec0406dfc4575e16b282209f0cb1ead16fe53d51bac7ac9e9e4",
+            "MODEL_DIR": "$HOME/models/dsv41-1017-exl3",
+            "SERVED": "deepseek-v4.1-flash-1017",
+            "HEAD": "localhost",        # the launcher runs on the head and ssh's to both ranks
+            "FAB_IF": "enp1s0f1np1",
+            "FAB_HCA": "rocep1s0f1",
+        },
     ),
 }

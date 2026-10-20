@@ -235,7 +235,7 @@ def api_unload(key: str) -> dict:
         raise HTTPException(404, "unknown model")
     if host.job(key) and not host.job(key).done:
         raise HTTPException(409, f"{m.name}: {host.job(key).action} already running")
-    cmd = f"cd {recipe_path(key)} && export WORKER={WORKER} && {m.stop}"
+    cmd = f"cd {recipe_path(key)} && {m.stop_command(WORKER, m.port)}"
     job = host.spawn(key, "stop", cmd, timeout=900)
     set_model_state(key, status="unloading")
     if load_state().get("active") == key:

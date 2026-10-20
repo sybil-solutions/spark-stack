@@ -7,7 +7,7 @@ into the DeepSeek harness (`dsh`).
 |---|---|---|---|
 | GLM-5.3-Flash | `MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks-TensorFold` | `Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold` (176 GB) | 8888 |
 | Qwen3.8-Flash-Next | `MiaAI-Lab/Qwen3.8-Flash-Dual-DGX-Sparks-TensorFold` | `nvidia/Qwen3.8-Flash-Next-NVFP4` (124 GB) | 8889 |
-| DeepSeek-V4.1-Flash | `0xSero/DeepSeek-V4.1-Flash-Two-Sparks` | `0xSero/DeepSeek-V4.1-Flash-Spark` (462 GB resident, EXL3 2.77 bpw) | 8000 |
+| DeepSeek-V4.1-Flash-1017 | `sudoingX/dgx-spark-deepseek-v41` @ `cc59c360` | `0xSero/DeepSeek-V4.1-Flash-1017-EXL3-2.7bpw` (199 GB) + DeepSeek Engram shards (203 GB) | 8000 |
 
 Only one model is resident at a time: each needs ~98 GiB per Spark and both ranks own the whole fabric.
 
@@ -61,7 +61,11 @@ All `/api` routes require `Authorization: Bearer $(cat ~/spark-stack-state/token
 
 - **Qwen has no Mia checkpoint**: "TensorFold by Mia" is the recipe and image publisher; the weights are NVIDIA's
   NVFP4 build. The registry pins `nvidia/Qwen3.8-Flash-Next-NVFP4@fc694b54`.
-- **DeepSeek is the user's own vLLM recipe**, 2.77 bpw EXL3 with the B12X kernels, not Mia's 2.9 bpw EAQ one.
+- **DeepSeek is the 1017 2.7 bpw pair**: `0xSero/DeepSeek-V4.1-Flash-1017-EXL3-2.7bpw` (199 GB, 2.70 bpw) served by
+  sudoingX's launcher at `cc59c360` with the pinned `ghcr.io/sybil-solutions/deepseek-v4.1-flash-exl3-spark` image.
+  The Engram tables are not in the checkpoint: `scripts/fetch-dsv41-1017.py` pulls DeepSeek's two shards at
+  `1bae0e10` into the same directory and verifies `MANIFEST.sha256`. Nothing is fetched until the card's `fetch` is
+  pressed.
 - Weights are prepared by each recipe's own `prepare.sh`/`download.sh`, which verify hashes and copy to the worker
   over the fabric.
 - The controller never writes into the recipe trees; state and job logs live in `~/spark-stack-state/`.
@@ -94,7 +98,7 @@ PASS
 |---|---|---|
 | GLM | cached | cached |
 | Qwen | downloading (`~/qwen-dl.log`) | cached |
-| DeepSeek | queued (`scripts/chain-after-downloads.sh`) | queued |
+| DeepSeek | not fetched (manual) | not fetched (manual) |
 
 `scripts/chain-after-downloads.sh` runs on the head: when the Qwen download ends it calls `prepare` (verify + copy to
 the worker over the fabric) and stops there. **DeepSeek is not fetched automatically** — press `fetch` on its card.
