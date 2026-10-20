@@ -7,7 +7,7 @@ into the DeepSeek harness (`dsh`).
 |---|---|---|---|
 | GLM-5.3-Flash | `MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks-TensorFold` | `Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold` (176 GB) | 8888 |
 | Qwen3.8-Flash-Next | `MiaAI-Lab/Qwen3.8-Flash-Dual-DGX-Sparks-TensorFold` | `nvidia/Qwen3.8-Flash-Next-NVFP4` (124 GB) | 8889 |
-| DeepSeek-V4.1-Flash | `0xSero/DeepSeek-V4.1-Flash-Two-Sparks` | `0xSero/DeepSeek-V4.1-Flash-Spark` (462 GB, EXL3 2.77 bpw) | 8000 |
+| DeepSeek-V4.1-Flash | `0xSero/DeepSeek-V4.1-Flash-Two-Sparks` | `0xSero/DeepSeek-V4.1-Flash-Spark` (462 GB resident, EXL3 2.77 bpw) | 8000 |
 
 Only one model is resident at a time: each needs ~98 GiB per Spark and both ranks own the whole fabric.
 
@@ -97,4 +97,6 @@ PASS
 | DeepSeek | queued (`scripts/chain-after-downloads.sh`) | queued |
 
 `scripts/chain-after-downloads.sh` runs on the head: when the Qwen download ends it calls `prepare` (verify + copy to
-the worker over the fabric), then starts the DeepSeek prepare (462 GB, several hours).
+the worker over the fabric) and stops there. **DeepSeek is not fetched automatically** — press `fetch` on its card.
+Its download is 462 GB resident: 240 GB of EXL3 banks plus 222 GB of base shards, ~203 GB of which arrives as
+`.partNN` files that reassemble into the two Engram shards and are deleted; peak disk while reassembling is ~665 GB.

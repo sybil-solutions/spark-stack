@@ -20,5 +20,6 @@ for _ in $(seq 1 240); do
 done
 echo "$(date -u +%FT%TZ) qwen prepare: $st"
 
-api -X POST "$API/api/models/deepseek/prepare" >/dev/null
-echo "$(date -u +%FT%TZ) deepseek prepare started: $(status_of deepseek)"
+# DeepSeek is not fetched automatically: 462 GB (240 GB EXL3 banks + 222 GB base shards, of which ~197 GB is
+# transient Engram parts). Press "fetch" on its card when you want it.
+echo "$(date -u +%FT%TZ) deepseek left un-started (manual fetch; ~462 GB download, ~265 GB resident)"

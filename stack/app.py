@@ -203,7 +203,7 @@ def api_prepare(key: str) -> dict:
         raise HTTPException(409, f"{m.name}: {host.job(key).action} already running")
     if endpoint_up(m.port):
         raise HTTPException(409, f"{m.name} is already serving")
-    cmd = f"cd {recipe_path(key)} && WORKER={WORKER} {m.prepare}"
+    cmd = f"cd {recipe_path(key)} && export WORKER={WORKER} && {m.prepare}"
     job = host.spawn(key, "prepare", cmd, timeout=6 * 3600)
     set_model_state(key, status="preparing", last=f"prepare started {time.strftime('%H:%M:%S')}")
     return {"ok": True, "job": job.log}
@@ -221,7 +221,7 @@ def api_load(key: str) -> dict:
         set_active(key)
         set_model_state(key, status="running")
         return {"ok": True, "already": True}
-    cmd = f"cd {recipe_path(key)} && WORKER={WORKER} {m.load_command(WORKER, m.port)}"
+    cmd = f"cd {recipe_path(key)} && export WORKER={WORKER} && {m.load_command(WORKER, m.port)}"
     job = host.spawn(key, "load", cmd, timeout=3 * 3600)
     set_active(key)
     set_model_state(key, status="loading", last=f"load started {time.strftime('%H:%M:%S')}")
@@ -235,7 +235,7 @@ def api_unload(key: str) -> dict:
         raise HTTPException(404, "unknown model")
     if host.job(key) and not host.job(key).done:
         raise HTTPException(409, f"{m.name}: {host.job(key).action} already running")
-    cmd = f"cd {recipe_path(key)} && WORKER={WORKER} {m.stop}"
+    cmd = f"cd {recipe_path(key)} && export WORKER={WORKER} && {m.stop}"
     job = host.spawn(key, "stop", cmd, timeout=900)
     set_model_state(key, status="unloading")
     if load_state().get("active") == key:
