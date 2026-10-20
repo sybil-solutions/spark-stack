@@ -1,0 +1,100 @@
+# spark stack
+
+One container that prepares, serves, frees, and reports on three models across **two DGX Sparks**, and wires them
+into the DeepSeek harness (`dsh`).
+
+| model | recipe | checkpoint | port |
+|---|---|---|---|
+| GLM-5.3-Flash | `MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks-TensorFold` | `Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold` (176 GB) | 8888 |
+| Qwen3.8-Flash-Next | `MiaAI-Lab/Qwen3.8-Flash-Dual-DGX-Sparks-TensorFold` | `nvidia/Qwen3.8-Flash-Next-NVFP4` (124 GB) | 8889 |
+| DeepSeek-V4.1-Flash | `0xSero/DeepSeek-V4.1-Flash-Two-Sparks` | `0xSero/DeepSeek-V4.1-Flash-Spark` (462 GB, EXL3 2.77 bpw) | 8000 |
+
+Only one model is resident at a time: each needs ~98 GiB per Spark and both ranks own the whole fabric.
+
+## How it works
+
+The container is a control plane, not a serving runtime. It runs on the **head** Spark with the host network and the
+host home mounted at the same path, so it uses the host's own ssh keys:
+
+- head actions go through `ssh localhost` (the host's sshd),
+- worker actions go through the recipe's own `ssh $WORKER docker …`,
+- each recipe is vendored under `vendor/` and driven by its own `start.sh` / `stop.sh` / `scripts/prepare.sh`,
+  unchanged, so the maintainers' preflight checks (RoCE rails, memory floor, port, image digest) still run.
+
+Nothing needs the docker socket: `docker` runs on the host, where the recipes expect it.
+
+## Run
+
+```bash
+# on the head Spark
+git clone <this repo> ~/spark-stack && cd ~/spark-stack
+mkdir -p vendor && (cd vendor && \
+  git clone --depth 1 https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks-TensorFold.git glm && \
+  git clone --depth 1 https://github.com/MiaAI-Lab/Qwen3.8-Flash-Dual-DGX-Sparks-TensorFold.git qwen && \
+  git clone --depth 1 https://github.com/0xSero/DeepSeek-V4.1-Flash-Two-Sparks.git deepseek)
+./deploy.sh build
+WORKER=valentine@10.10.10.13 ./deploy.sh run     # worker's fabric address
+```
+
+Open `http://<head>:8099` and paste the token from `~/spark-stack-state/token` (the controller holds the host's
+ssh keys, so every `/api` call needs it). The UI has four panes, matching the wireframes: **connect** (the two nodes and the
+fabric link), **hardware** (per-node facts), **models** (three cards: load / free / fetch / log), **running**
+(endpoint, live counters, node memory).
+
+`wire harness` writes the three providers into `~/.dsh/profiles/web/cordis.patch.yml` and prints the YAML it wrote.
+
+## API
+
+| method | path | purpose |
+|---|---|---|
+| GET | `/api/state` | nodes, models, active, harness routes |
+| GET | `/api/stats` | live node facts and per-model metrics |
+| POST | `/api/models/{glm,qwen,deepseek}/prepare` | download weights and image on both Sparks |
+| POST | `/api/models/{id}/load` | start both ranks, refuse if another model serves |
+| POST | `/api/models/{id}/unload` | stop both ranks |
+| GET | `/api/models/{id}/logs?lines=120` | tail of the running job |
+| POST | `/api/harness/apply` | write the dsh provider routes into the profile layer |
+
+All `/api` routes require `Authorization: Bearer $(cat ~/spark-stack-state/token)`; the page itself carries no token.
+
+## Notes
+
+- **Qwen has no Mia checkpoint**: "TensorFold by Mia" is the recipe and image publisher; the weights are NVIDIA's
+  NVFP4 build. The registry pins `nvidia/Qwen3.8-Flash-Next-NVFP4@fc694b54`.
+- **DeepSeek is the user's own vLLM recipe**, 2.77 bpw EXL3 with the B12X kernels, not Mia's 2.9 bpw EAQ one.
+- Weights are prepared by each recipe's own `prepare.sh`/`download.sh`, which verify hashes and copy to the worker
+  over the fabric.
+- The controller never writes into the recipe trees; state and job logs live in `~/spark-stack-state/`.
+
+## Verified on spark-2384 (head) + spark-557f (worker)
+
+```
+$ TOKEN=$(cat ~/spark-stack-state/token) bash tests/e2e.sh http://127.0.0.1:8099 glm
+== state
+  head   spark-2384 reachable 11 GiB
+  worker 10.10.10.13 reachable 14 GiB
+== load glm
+  endpoint up
+== completion
+  model=GLM-5.3-Flash-EXL3 completion_tokens=85 text='stack ok'
+== stats
+  active: glm
+  up: glm metrics
+== unload glm
+  down
+PASS
+```
+
+`tests/harness.sh` passes too: `dsh 0.2.1-rc.2` is in the image, the patch keeps the user's existing routes and adds
+`spark-glm`, `spark-qwen`, `spark-deepseek`.
+
+## Weights
+
+| model | on the head | on the worker |
+|---|---|---|
+| GLM | cached | cached |
+| Qwen | downloading (`~/qwen-dl.log`) | cached |
+| DeepSeek | queued (`scripts/chain-after-downloads.sh`) | queued |
+
+`scripts/chain-after-downloads.sh` runs on the head: when the Qwen download ends it calls `prepare` (verify + copy to
+the worker over the fabric), then starts the DeepSeek prepare (462 GB, several hours).
