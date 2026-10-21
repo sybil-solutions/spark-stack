@@ -192,10 +192,10 @@ if [ "$("$NODE_DIR/bin/node" --version 2>/dev/null)" != "$NODE_VERSION" ]; then
   tar -xJf "$tmp/node.tar.xz" -C "$tmp"
   sudo rm -rf "$NODE_DIR" && sudo mv "$tmp/node-$NODE_VERSION-linux-arm64" "$NODE_DIR" && rm -rf "$tmp"
 fi
-if [ "$("$NODE_DIR/bin/dsh" --version 2>/dev/null | tail -1)" != "$DSH_VERSION" ]; then
+if [ "$(PATH="$NODE_DIR/bin:$PATH" dsh --version 2>/dev/null | tail -1)" != "$DSH_VERSION" ]; then
   sudo env PATH="$NODE_DIR/bin:$PATH" "$NODE_DIR/bin/npm" install -g --silent --no-fund --no-audit "@deepseek-ai/dsh@$DSH_VERSION" >/dev/null
 fi
-info "DeepSeek harness $("$NODE_DIR/bin/dsh" --version 2>/dev/null | tail -1)"
+info "DeepSeek harness $(PATH="$NODE_DIR/bin:$PATH" dsh --version 2>/dev/null | tail -1)"
 
 OC_DEB=/tmp/opencode-desktop-$OPENCODE_VERSION-arm64.deb
 OC_PKG=""
@@ -243,6 +243,9 @@ info "running at http://$TS_IP:$PORT"
 step "Harnesses and dock"
 ENDPOINT="http://$TS_IP:$PORT/v1"
 mkdir -p ~/.dsh/profiles/web ~/.config/opencode ~/.local/bin ~/.local/share/applications ~/.local/share/icons ~/.local/state/spark-stack
+chmod 700 ~/.local/state/spark-stack
+touch ~/.local/state/spark-stack/dsh-web.log 2>/dev/null || true   # it holds the sign-in link: yours, mode 600
+sudo chown "$U:" ~/.local/state/spark-stack/dsh-web.log && chmod 600 ~/.local/state/spark-stack/dsh-web.log
 (cd "$STACK_DIR" && python3 -m stack.harness dsh ~/.dsh/profiles/web/cordis.patch.yml "$ENDPOINT" >/dev/null)
 (cd "$STACK_DIR" && python3 -m stack.harness opencode ~/.config/opencode/opencode.json "$ENDPOINT" >/dev/null)
 

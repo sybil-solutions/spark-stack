@@ -437,17 +437,25 @@ def api_stats() -> dict:
 def model_list() -> dict:
     data = [{"id": ALIAS, "object": "model", "owned_by": "spark-stack"}]
     data += [{"id": m.api_id, "object": "model", "owned_by": "spark-stack"} for m in MODELS.values()]
+    data += [{"id": f"{m.api_id}@{n}x", "object": "model", "owned_by": "spark-stack"}
+             for m in MODELS.values() if len(m.recipes) > 1 for n in sorted(m.recipes)]
     return {"object": "list", "data": data}
 
 
 def resolve_target(requested: str | None):
-    """Pick the model a request goes to: the one it names, or the running one for the alias."""
+    """Pick the model a request goes to: the one it names (optionally `<id>@1x` / `<id>@2x` for one recipe), or the
+    running one for the alias."""
     running = [m for m in MODELS.values() if endpoint_up(m.port)]
     if requested and requested != ALIAS:
-        named = next((m for m in MODELS.values() if requested in (m.api_id, m.key, m.name)), None)
+        base, _, variant = requested.partition("@")
+        named = next((m for m in MODELS.values() if base in (m.api_id, m.key, m.name)), None)
         if named:
-            if named in running:
+            want = int(variant[0]) if re.fullmatch(r"[12]x", variant) else None
+            have = load_state()["models"].get(named.key, {}).get("sparks")
+            if named in running and (want is None or want == have):
                 return named, None
+            if named in running:
+                return None, f"{named.name} is running on {have} Spark(s), not {want}. Use '{named.api_id}' or restart it on {want}."
             hint = f" ({running[0].name} is running; pick it or '{ALIAS}')" if running else ""
             return None, f"{named.name} is not running. Start it in Spark Stack{hint}."
     if running:
