@@ -37,6 +37,7 @@ step() { n=$((n + 1)); printf '\n\033[1m[%s/9] %s\033[0m\n' "$n" "$*"; }
 info() { printf '  %s\n' "$*"; }
 die() { printf '\n\033[31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
+main() {   # the whole run lives in one function: bash reads it completely before ssh can swallow a piped script
 [ "$(id -u)" -ne 0 ] || die "run this as your normal desktop user, not root (it asks for your password)"
 [ "$(uname -m)" = aarch64 ] || die "this installer is for DGX Spark / GB10 systems (arm64)"
 for c in nvidia-smi docker git curl python3 ssh; do command -v "$c" >/dev/null || die "$c is missing"; done
@@ -74,37 +75,51 @@ mkdir -p ~/.ssh && chmod 700 ~/.ssh
 [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519 -C "$U@$(hostname) spark-stack"
 PUB=$(cat ~/.ssh/id_ed25519.pub)
 
-link_peer() {   # the IPv6 link-local address of whatever is on the other end of the CX7 cable
+link_peer() {   # the IPv6 link-local address of whatever is on the other end of the CX7 cable, when it has one
   local ifc
   ifc=$(ibdev2netdev 2>/dev/null | awk '/\(Up\)/ {print $5}' | sort | head -1)
   [ -n "$ifc" ] || return 0
   ping -6 -c 2 -W 1 "ff02::1%$ifc" >/dev/null 2>&1 || true
   ip -6 neigh show dev "$ifc" | awk '/^fe80/ && !/FAILED/ {print $1; exit}' | sed "s/\$/%$ifc/"
 }
-
-BOOT=""   # how we reach the second Spark before its CX7 address exists
-if [ "${SINGLE:-0}" != 1 ]; then
-  if [ -n "${WORKER:-}" ]; then
-    BOOT=$WORKER
-  else
-    LL=$(link_peer)
-    if [ -n "$LL" ]; then
-      info "found a Spark on the cable ($LL)"
-      if ssh "${SSHO[@]}" "$U@$LL" true 2>/dev/null; then
-        BOOT="$U@$LL"
-      else
-        # Tailscale SSH needs no password: find the tailnet peer that owns that link-local address.
-        for peer in $(tailscale status --json 2>/dev/null | python3 -c 'import sys,json
+tailnet_sparks() {   # tailnet machines we can ssh to as $U without a password (Tailscale SSH) that have a CX7 link up
+  local peer h
+  for peer in $(tailscale status --json 2>/dev/null | python3 -c 'import sys,json
 d=json.load(sys.stdin)
 print(" ".join(p["DNSName"].rstrip(".") for p in (d.get("Peer") or {}).values() if p.get("Online") and p.get("OS")=="linux"))'); do
-          if ssh "${SSHO[@]}" -o ConnectTimeout=4 "$U@$peer" "ip -6 addr | grep -q '${LL%\%*}'" 2>/dev/null; then BOOT="$U@$peer"; break; fi
-        done
-        [ -n "$BOOT" ] || BOOT="$U@$LL"
-      fi
+    h=$(ssh -n "${SSHO[@]}" -o ConnectTimeout=4 "$U@$peer" "ibdev2netdev 2>/dev/null | grep -q '(Up)' && hostname" 2>/dev/null) \
+      && [ -n "$h" ] && [ "$h" != "$(hostname)" ] && echo "$U@$peer"
+  done
+  return 0
+}
+
+BOOT=""   # how we reach the second Spark before its CX7 address exists
+if [ "${SINGLE:-0}" = 1 ]; then
+  info "SINGLE=1: setting up this Spark only"
+elif [ -n "${WORKER:-}" ]; then
+  BOOT=$WORKER
+elif ! ibdev2netdev 2>/dev/null | grep -q '(Up)'; then
+  info "no QSFP cable link: setting up this Spark only"
+else
+  LL=$(link_peer)
+  if [ -n "$LL" ] && ssh -n "${SSHO[@]}" "$U@$LL" true 2>/dev/null; then
+    BOOT="$U@$LL"
+  else
+    mapfile -t CANDS < <(tailnet_sparks)
+    if [ "${#CANDS[@]}" -eq 1 ]; then
+      BOOT=${CANDS[0]}
+    elif [ "${#CANDS[@]}" -gt 1 ]; then
+      info "more than one Spark answers on the tailnet: ${CANDS[*]}"
+      read -rp "  Which one is on the other end of the cable? " BOOT </dev/tty || true
+      [ -n "$BOOT" ] || die "run again with WORKER=$U@<that Spark>"
+      [[ "$BOOT" == *@* ]] || BOOT="$U@$BOOT"
+    elif [ -n "$LL" ]; then
+      BOOT="$U@$LL"
     else
-      info "no Spark on the CX7 cable: setting up this Spark only"
+      die "the QSFP link is up but the Spark on the other end was not found; run again with WORKER=$U@<its Tailscale name or IP>"
     fi
   fi
+  info "the second Spark is reached through $BOOT"
 fi
 
 wsudo() {   # run a root script on the second Spark: sudo -n when it needs no password, else feed it the password
@@ -313,3 +328,6 @@ printf '  Harnesses:     DeepSeek Harness and OpenCode on the dock\n'
 printf '  Repair:        run the same command again\n'
 [ -z "$BOOT" ] || printf '  Second Spark:  %s over the CX7 link (%s)\n' "$WORKER_HOST" "${WORKER_IPS[0]}"
 printf '  Docker access: log out and back in once so your user can run docker without sudo\n'
+}
+
+main "$@"
