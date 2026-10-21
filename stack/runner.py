@@ -90,6 +90,15 @@ class Host:
                 job.done, job.rc = True, job.rc if job.rc is not None else -1
         return job
 
+    def cancel(self, key: str) -> None:
+        """Stop a running job's ssh (its remote command gets SIGHUP); the recipe's stop.sh cleans up the rest."""
+        job = self.job(key)
+        if job and not job.done and job.pid:
+            try:
+                os.kill(job.pid, 15)
+            except OSError:
+                pass
+
     def tail(self, log_path: str, lines: int = 60) -> list[str]:
         try:
             return Path(log_path).read_text(errors="replace").splitlines()[-lines:]

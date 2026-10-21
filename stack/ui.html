@@ -3,315 +3,227 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>spark stack</title>
+<title>Spark Stack</title>
 <style>
-  :root {
-    --bg: #191919; --fg: #d8d8d8; --muted: #8a8a8a; --line: #2c2c2c;
-    --ok: #9ec48f; --warn: #d9b26a; --err: #d98a8a; --panel: #1e1e1e;
-  }
+  :root { --bg:#fff; --fg:#1f1f1f; --muted:#6b6b6b; --line:#e3e3e3; --soft:#f6f6f4; --ok:#2f7d32; --warn:#9a6700; --err:#b42318; --link:#0b57d0; }
   * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--fg);
-    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  a { color: inherit; }
-  header {
-    display: flex; align-items: center; gap: 18px;
-    padding: 12px 18px; border-bottom: 1px solid var(--line);
-  }
-  header h1 { font-size: 13px; font-weight: 600; letter-spacing: .08em; margin: 0; text-transform: uppercase; }
-  .pill { border: 1px solid var(--line); border-radius: 3px; padding: 1px 7px; font-size: 11px; color: var(--muted); }
-  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 -apple-system, "Segoe UI", Ubuntu, Roboto, sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 22px 22px 60px; }
+  h1 { font-size: 26px; margin: 0 0 2px; font-weight: 650; }
+  h2 { font-size: 18px; margin: 30px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--line); font-weight: 600; }
+  .sub { color: var(--muted); font-size: 13px; }
+  a { color: var(--link); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; font-size: 12px; color: var(--muted); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  code { background: var(--soft); padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+  .model { border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; margin: 12px 0; }
+  .model.running { border-color: var(--ok); box-shadow: inset 4px 0 0 var(--ok); }
+  .model h3 { margin: 0; font-size: 17px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .model p { margin: 4px 0 10px; color: var(--muted); font-size: 14px; }
+  .status { font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; background: var(--soft); color: var(--muted); }
+  .status.running { background: #e6f4ea; color: var(--ok); }
+  .status.downloading, .status.starting, .status.stopping { background: #fff4d6; color: var(--warn); }
+  .status.error { background: #fde7e7; color: var(--err); }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .choice { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+  .choice label { padding: 5px 12px; cursor: pointer; font-size: 14px; border-right: 1px solid var(--line); }
+  .choice label:last-child { border-right: none; }
+  .choice input { display: none; }
+  .choice input:checked + span { font-weight: 650; }
+  .choice label:has(input:checked) { background: var(--soft); }
+  .choice label.off { color: #b8b8b8; cursor: not-allowed; }
+  button { font: inherit; font-size: 14px; padding: 5px 14px; border: 1px solid #c9c9c9; background: #fff; border-radius: 5px; cursor: pointer; }
+  button:hover { background: var(--soft); }
+  button.go { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  button.stop { border-color: var(--err); color: var(--err); }
+  button[disabled] { opacity: .4; cursor: default; }
+  .bar { height: 8px; background: var(--soft); border-radius: 4px; overflow: hidden; width: 260px; }
+  .bar i { display: block; height: 100%; background: #6c9f6e; }
+  .facts { font-size: 13px; color: var(--muted); }
+  pre.log { background: #fafafa; border: 1px solid var(--line); padding: 8px; font-size: 12px; max-height: 220px; overflow: auto; white-space: pre-wrap; margin: 10px 0 0; }
+  .nodes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .node { border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; font-size: 14px; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#bbb; margin-right:6px; }
   .dot.on { background: var(--ok); } .dot.off { background: var(--err); }
-  nav { display: flex; gap: 2px; padding: 8px 18px 0; border-bottom: 1px solid var(--line); }
-  nav button {
-    background: none; border: 1px solid transparent; border-bottom: none; color: var(--muted);
-    padding: 6px 12px; font: inherit; cursor: pointer; border-radius: 3px 3px 0 0;
-  }
-  nav button.sel { color: var(--fg); border-color: var(--line); background: var(--panel); }
-  main { padding: 18px; max-width: 1180px; }
-  section { display: none; } section.sel { display: block; }
-  h2 { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-weight: 500; margin: 0 0 10px; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { text-align: left; padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line); font-weight: 400; vertical-align: top; }
-  th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  .grid { display: grid; gap: 14px; }
-  .grid.two { grid-template-columns: 1fr 1fr; }
-  .grid.three { grid-template-columns: repeat(3, 1fr); }
-  .card { border: 1px solid var(--line); background: var(--panel); border-radius: 4px; padding: 12px 14px; }
-  .card h3 { margin: 0 0 2px; font-size: 13px; font-weight: 600; }
-  .card .sub { color: var(--muted); font-size: 11px; margin-bottom: 10px; }
-  .kv { width: 100%; }
-  .kv td { border-bottom: none; padding: 2px 0; }
-  .kv td:first-child { color: var(--muted); width: 44%; }
-  .actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
-  button.act {
-    background: none; border: 1px solid var(--line); color: var(--fg); font: inherit;
-    padding: 4px 10px; border-radius: 3px; cursor: pointer; font-size: 12px;
-  }
-  button.act:hover { border-color: var(--muted); }
-  button.act[disabled] { opacity: .35; cursor: default; }
-  button.act.primary { border-color: #4a5a4a; color: var(--ok); }
-  .status { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-  .s-running { color: var(--ok); } .s-loading, .s-preparing, .s-unloading { color: var(--warn); }
-  .s-absent { color: var(--muted); } .s-error { color: var(--err); }
-  pre.log {
-    margin: 10px 0 0; padding: 8px; background: #151515; border: 1px solid var(--line);
-    max-height: 190px; overflow: auto; font-size: 11px; color: var(--muted); white-space: pre-wrap;
-  }
-  .bars { display: flex; align-items: flex-end; gap: 2px; height: 46px; margin-top: 8px; }
-  .bars i { display: block; width: 5px; background: #3c4a3c; }
-  .bars i.hi { background: var(--ok); }
-  svg { display: block; width: 100%; height: auto; }
-  svg .node { fill: none; stroke: var(--muted); }
-  svg text { fill: var(--fg); font-family: inherit; font-size: 11px; }
-  svg .muted { fill: var(--muted); }
-  .foot { color: var(--muted); font-size: 11px; margin-top: 16px; }
-  .badge { border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; font-size: 10px; color: var(--muted); }
+  .msg { padding: 8px 12px; border-radius: 5px; background: #fde7e7; color: var(--err); margin: 10px 0; display: none; }
+  .gate { max-width: 420px; margin: 80px auto; }
+  .gate input { width: 100%; padding: 8px; font: inherit; border: 1px solid #c9c9c9; border-radius: 5px; }
 </style>
 </head>
 <body>
-<header>
-  <h1>spark stack</h1>
-  <span class="pill"><span id="h-dot" class="dot"></span><span id="h-name">head</span></span>
-  <span class="pill"><span id="w-dot" class="dot"></span><span id="w-name">worker</span></span>
-  <span class="pill">active <span id="active">none</span></span>
-  <span style="flex:1"></span>
-  <a class="pill" id="harness" href="http://127.0.0.1:3080" target="_blank" rel="noreferrer">open harness</a>
-</header>
+<div class="wrap" id="app">
+  <h1>Spark Stack</h1>
+  <div class="sub" id="subtitle">Download, start and stop local AI models on your DGX Sparks.</div>
+  <div class="msg" id="msg"></div>
 
-<nav>
-  <button data-tab="connect" class="sel">connect</button>
-  <button data-tab="nodes">hardware</button>
-  <button data-tab="models">models</button>
-  <button data-tab="running">running</button>
-</nav>
+  <h2>Machines</h2>
+  <div class="nodes" id="nodes"></div>
 
-<main>
-  <section id="connect" class="sel">
-    <h2>two sparks, one fabric</h2>
-    <div class="card">
-      <svg viewBox="0 0 920 190" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Head and worker connected by the fabric">
-        <rect class="node" x="20" y="40" width="250" height="110" rx="4"/>
-        <text x="36" y="66">head · <tspan id="svg-head">spark-2384</tspan></text>
-        <text class="muted" x="36" y="88" id="svg-head-ip">10.10.10.12</text>
-        <text class="muted" x="36" y="108" id="svg-head-port">api :8888</text>
-        <text class="muted" x="36" y="128" id="svg-head-mem">mem —</text>
+  <h2>Models</h2>
+  <div class="sub">One model runs at a time. Pick 1 or 2 Sparks, press <b>Download</b> once, then <b>Start</b>. Stop it before starting another.</div>
+  <div id="models"></div>
 
-        <rect class="node" x="650" y="40" width="250" height="110" rx="4"/>
-        <text x="666" y="66">worker · <tspan id="svg-worker">spark-557f</tspan></text>
-        <text class="muted" x="666" y="88" id="svg-worker-ip">10.10.10.13</text>
-        <text class="muted" x="666" y="108">rank 1</text>
-        <text class="muted" x="666" y="128" id="svg-worker-mem">mem —</text>
+  <h2>Use it</h2>
+  <table id="connect"></table>
 
-        <line x1="270" y1="95" x2="650" y2="95" stroke="var(--muted)" stroke-width="1"/>
-        <line x1="270" y1="95" x2="650" y2="95" stroke="var(--ok)" stroke-width="1" stroke-dasharray="4 4" id="svg-link"/>
-        <text class="muted" x="380" y="86">connectx-7 · roce · 200 gbps</text>
-        <text class="muted" x="380" y="112" id="svg-link-state">link state —</text>
-      </svg>
-      <div class="actions">
-        <button class="act" onclick="refresh()">probe</button>
-        <button class="act" onclick="applyHarness()">wire harness</button>
-        <span class="foot" id="probe-note"></span>
-      </div>
-    </div>
-  </section>
+  <h2>Disk</h2>
+  <div class="sub">Model files on each Spark. Remove one to free space; it downloads again the next time you start that model.</div>
+  <div id="disk"></div>
 
-  <section id="nodes">
-    <h2>hardware</h2>
-    <div class="grid two" id="node-cards"></div>
-  </section>
-
-  <section id="models">
-    <h2>model function</h2>
-    <div class="grid three" id="model-cards"></div>
-    <div class="foot">one model is resident at a time: loading a second frees the first.</div>
-  </section>
-
-  <section id="running">
-    <h2>running</h2>
-    <div class="grid two">
-      <div class="card">
-        <h3 id="run-name">no model loaded</h3>
-        <div class="sub" id="run-sub">load one from the models tab</div>
-        <table class="kv" id="run-kv"></table>
-        <div class="bars" id="run-bars"></div>
-        <div class="foot" id="run-note"></div>
-      </div>
-      <div class="card">
-        <h3>nodes</h3>
-        <div class="sub">memory available and gpu utilisation</div>
-        <table class="kv" id="run-nodes"></table>
-      </div>
-    </div>
-  </section>
-</main>
+  <p class="sub" style="margin-top:34px">Spark Stack · <a href="https://github.com/sybil-solutions/spark-stack">github.com/sybil-solutions/spark-stack</a> · recipes by <a href="https://github.com/MiaAI-Lab">MiaAI-Lab</a></p>
+</div>
 
 <script>
-const $ = (s) => document.querySelector(s);
-let state = null, stats = null, hist = {head: [], worker: []}, lastCounters = {};
+let TOKEN = localStorage.getItem('stack-token') || '';
+const picks = JSON.parse(localStorage.getItem('stack-picks') || '{}');
+const openLogs = new Set();
+let STATE = null;
+let GATED = false;
 
-let TOKEN = sessionStorage.getItem('stack-token') || '';
-const api = (path, opts = {}) => fetch(path, {
-  ...opts,
-  headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + TOKEN },
-}).then(async (r) => {
-  if (r.status === 401) { showTokenGate(); throw new Error('unauthorized'); }
-  return r;
-});
-
-function showTokenGate() {
-  if (document.getElementById('gate')) return;
-  const gate = document.createElement('div');
-  gate.id = 'gate';
-  gate.style.cssText = 'position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9';
-  gate.innerHTML = `<div class="card" style="min-width:340px">
-    <h3>token required</h3>
-    <div class="sub">read it on the head: ~/spark-stack-state/token</div>
-    <input id="gate-token" type="password" autocomplete="off" style="width:100%;padding:6px;background:#151515;border:1px solid var(--line);color:var(--fg);font:inherit">
-    <div class="actions"><button class="act primary" id="gate-go">open</button></div>
-  </div>`;
-  document.body.appendChild(gate);
-  document.getElementById('gate-go').onclick = () => {
-    TOKEN = document.getElementById('gate-token').value.trim();
-    sessionStorage.setItem('stack-token', TOKEN);
-    gate.remove();
-    refresh();
-  };
+async function api(path, opts = {}) {
+  if (GATED) throw new Error('unauthorized');
+  const r = await fetch(path, { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + TOKEN } });
+  if (r.status === 401) { GATED = true; gate(); throw new Error('unauthorized'); }
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || r.statusText);
+  return body;
 }
+function gate() {
+  document.getElementById('app').innerHTML = `<div class="gate"><h1>Spark Stack</h1>
+    <p class="sub">This page is open without a key on the Spark itself. From another computer, paste the access key: on the Spark it is in <code>~/spark-stack-state/token</code>.</p>
+    <input id="k" type="password" autocomplete="off"><p><button class="go" onclick="localStorage.setItem('stack-token', document.getElementById('k').value.trim()); location.reload()">Open</button></p></div>`;
+}
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function gib(b) { return (b / 2**30).toFixed(1) + ' GiB'; }
+function flash(text) { const m = document.getElementById('msg'); m.textContent = text; m.style.display = text ? 'block' : 'none'; }
 
-document.querySelectorAll('nav button').forEach((b) => b.onclick = () => {
-  document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('sel', x === b));
-  document.querySelectorAll('section').forEach((s) => s.classList.toggle('sel', s.id === b.dataset.tab));
-});
-
-function fmt(n, d = 0) { return n === undefined || n === null || n === '' || isNaN(n) ? '—' : Number(n).toFixed(d); }
-
-async function refresh() {
+async function act(key, action) {
+  flash('');
+  const sparks = picks[key] || defaultSparks(STATE.models.find(m => m.key === key));
+  if (action === 'unload' && !confirm('Stop this model?')) return;
   try {
-    const r = await api('/api/state'); state = await r.json();
-  } catch (e) { return; }
-  $('#h-dot').className = 'dot ' + (state.nodes.head.reachable ? 'on' : 'off');
-  $('#w-dot').className = 'dot ' + (state.nodes.worker.reachable ? 'on' : 'off');
-  $('#h-name').textContent = state.nodes.head.name;
-  $('#w-name').textContent = state.nodes.worker.name;
-  $('#active').textContent = state.active || 'none';
-  $('#svg-head').textContent = state.nodes.head.name;
-  $('#svg-worker').textContent = state.nodes.worker.name;
-  $('#svg-head-ip').textContent = 'fabric ' + state.nodes.head.fabric;
-  $('#svg-worker-ip').textContent = 'fabric ' + state.nodes.worker.fabric;
-  const act = state.models.find((m) => m.key === state.active);
-  $('#svg-head-port').textContent = act ? 'api :' + act.port : 'api —';
-  $('#svg-head-mem').textContent = 'mem ' + fmt(state.nodes.head.mem_gib) + ' GiB';
-  $('#svg-worker-mem').textContent = 'mem ' + fmt(state.nodes.worker.mem_gib) + ' GiB';
-  $('#svg-link').style.opacity = state.nodes.worker.reachable ? 1 : 0.15;
-  $('#svg-link-state').textContent = state.nodes.worker.reachable ? 'link up' : 'worker unreachable';
-  $('#probe-note').textContent = new Date().toLocaleTimeString();
-  $('#harness').href = state.harness.web;
-  renderNodes(); renderModels(); renderRunning();
+    await api(`/api/models/${key}/${action}?sparks=${sparks}`, { method: 'POST' });
+    openLogs.add(key);
+  } catch (e) { flash(e.message); }
+  refresh();
+}
+async function removeDir(path, label) {
+  if (!confirm(`Remove ${label} from both Sparks?`)) return;
+  try { await api('/api/disk/remove', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({ path }) }); }
+  catch (e) { flash(e.message); }
+  refresh(true);
+}
+function pick(key, sparks) { picks[key] = sparks; localStorage.setItem('stack-picks', JSON.stringify(picks)); render(); }
+function toggleLog(key) { openLogs.has(key) ? openLogs.delete(key) : openLogs.add(key); render(); }
+function defaultSparks(m) {
+  const avail = m.variants.filter(v => v.available).map(v => v.sparks);
+  return m.sparks && avail.includes(m.sparks) ? m.sparks : Math.max(...avail);
 }
 
-function nodeCard(id, n) {
-  return `<div class="card">
-    <h3>${n.name} <span class="badge">${id}</span></h3>
-    <div class="sub">${n.reachable ? 'reachable' : 'unreachable'}</div>
-    <table class="kv">
-      <tr><td>fabric</td><td>${n.fabric}</td></tr>
-      <tr><td>mem available</td><td>${fmt(n.mem_gib)} GiB</td></tr>
-      <tr><td>gpu util</td><td>${n.util ?? '—'}%</td></tr>
-      <tr><td>disk free</td><td>${fmt(n.disk)} GB</td></tr>
-      <tr><td>load</td><td>${n.load ?? '—'}</td></tr>
-    </table>
-  </div>`;
+function renderNodes(nodes) {
+  document.getElementById('nodes').innerHTML = Object.values(nodes).map(n => `
+    <div class="node"><b><span class="dot ${n.reachable ? 'on' : 'off'}"></span>${esc(n.host || n.name)}</b> <span class="sub">${n.role}</span><br>
+    ${n.reachable ? `<span class="facts">memory free ${esc(n.mem_gib)} of ${esc(n.mem_total_gib)} GiB · GPU ${esc(n.util)}% · ${esc(Math.round(n.power_w))} W · ${esc(n.temp_c)} °C<br>
+    disk free ${esc(n.disk_free_gb)} of ${esc(n.disk_total_gb)} GB</span>` : `<span class="facts">not reachable: ${esc(n.detail)}</span>`}</div>`).join('');
 }
 
-function renderNodes() {
-  $('#node-cards').innerHTML = nodeCard('head', state.nodes.head) + nodeCard('worker', state.nodes.worker);
-}
-
-function renderModels() {
-  $('#model-cards').innerHTML = state.models.map((m) => {
-    const busy = !!(m.job);
-    const canLoad = m.status !== 'loading' && m.status !== 'preparing' && !m.up;
-    const canFree = m.up || m.status === 'running' || m.status === 'loading';
-    return `<div class="card">
-      <h3>${m.name}</h3>
-      <div class="sub">${m.kind} · ${m.checkpoint}</div>
-      <table class="kv">
-        <tr><td>status</td><td><span class="status s-${m.status}">${m.status}</span>${m.up ? ' · <span class="status s-running">up</span>' : ''}</td></tr>
-        <tr><td>weights</td><td>${m.size_gib} GiB</td></tr>
-        <tr><td>port</td><td>${m.port}</td></tr>
-        <tr><td>context</td><td>${Math.round(m.context / 1024)}k${m.vision ? ' · vision' : ''}</td></tr>
-        <tr><td>api id</td><td>${m.api_id}</td></tr>
-      </table>
-      <div class="actions">
-        <button class="act primary" ${canLoad && !busy ? '' : 'disabled'} onclick="act('${m.key}','load')">load</button>
-        <button class="act" ${canFree && !busy ? '' : 'disabled'} onclick="act('${m.key}','unload')">free</button>
-        <button class="act" ${busy ? 'disabled' : ''} onclick="act('${m.key}','prepare')">fetch</button>
-        ${m.kind === 'tensorfold' ? `<button class="act" ${busy ? 'disabled' : ''} onclick="act('${m.key}','prepare','?mode=rebuild')">rebuild image</button>` : ''}
-        <button class="act" onclick="logs('${m.key}')">log</button>
+function renderModels(models, active) {
+  document.getElementById('models').innerHTML = models.map(m => {
+    const sparks = picks[m.key] || defaultSparks(m);
+    const v = m.variants.find(x => x.sparks === sparks) || m.variants[0];
+    const busy = ['downloading', 'starting', 'stopping'].includes(m.status);
+    const other = active && active.key !== m.key;
+    const pct = Math.min(100, Math.round(100 * v.downloaded_gib / v.size_gib));
+    const choice = [1, 2].map(n => {
+      const has = m.variants.find(x => x.sparks === n);
+      const ok = has && has.available;
+      return `<label class="${ok ? '' : 'off'}" title="${has ? (ok ? '' : 'needs a second Spark') : 'no ' + n + '-Spark recipe for this model'}">
+        <input type="radio" name="s-${m.key}" ${n === sparks ? 'checked' : ''} ${ok && !busy && !m.up ? '' : 'disabled'} onchange="pick('${m.key}', ${n})"><span>${n} Spark${n > 1 ? 's' : ''}</span></label>`;
+    }).join('');
+    const log = openLogs.has(m.key) ? `<pre class="log" id="log-${m.key}">…</pre>` : '';
+    return `<div class="model ${m.up ? 'running' : ''}">
+      <h3>${esc(m.name)} <span class="status ${m.status}">${m.status === 'absent' ? 'not downloaded' : m.status}</span></h3>
+      <p>${esc(m.blurb)}</p>
+      <div class="row"><span class="choice">${choice}</span>
+        <span class="facts">${esc(v.decode)} · ${v.size_gib} GiB download · window ${(m.context/1024).toFixed(0)}K tokens${m.vision ? ' · images' : ''}</span></div>
+      <div class="row" style="margin-top:10px">
+        ${v.complete ? '<span class="facts">✔ downloaded</span>' :
+          `<button onclick="act('${m.key}','prepare')" ${busy || m.up ? 'disabled' : ''}>Download</button>
+           <span class="bar"><i style="width:${pct}%"></i></span><span class="facts">${v.downloaded_gib} / ${v.size_gib} GiB</span>`}
+        ${m.up || m.status === 'starting' ? `<button class="stop" onclick="act('${m.key}','unload')" ${m.status === 'stopping' ? 'disabled' : ''}>Stop</button>`
+               : `<button class="go" onclick="act('${m.key}','load')" ${busy || other ? 'disabled' : ''} title="${other ? 'stop the running model first' : ''}">Start</button>`}
+        <button onclick="toggleLog('${m.key}')">${openLogs.has(m.key) ? 'Hide' : 'Show'} log</button>
+        <span class="facts">${esc(m.last || '')}</span>
       </div>
-      <pre class="log" id="log-${m.key}" hidden></pre>
-    </div>`;
+      ${m.up ? `<div class="facts" style="margin-top:8px">Running on ${m.sparks || sparks} Spark(s). Model id <code>${esc(m.api_id)}</code> or <code>${esc(STATE.alias)}</code> at <code>${esc(STATE.endpoint)}</code> <span id="tps-${m.key}"></span></div>` : ''}
+      <div class="facts" style="margin-top:6px">Recipe: <a href="${esc(v.repo)}" target="_blank">${esc(v.repo.replace('https://github.com/', ''))}</a> @ ${esc(v.commit)}</div>
+      ${log}</div>`;
   }).join('');
+  for (const key of openLogs) loadLog(key);
+}
+async function loadLog(key) {
+  const el = document.getElementById('log-' + key);
+  if (!el) return;
+  try {
+    const r = await api(`/api/models/${key}/logs?lines=60`);
+    el.textContent = r.lines.length ? r.lines.join('\n') : 'no log yet';
+    el.scrollTop = el.scrollHeight;
+  } catch (e) { el.textContent = e.message; }
 }
 
-function renderRunning() {
-  const act = state.models.find((m) => m.key === state.active);
-  $('#run-name').textContent = act ? act.name : 'no model loaded';
-  $('#run-sub').textContent = act ? `${act.kind} · ${act.checkpoint}` : 'load one from the models tab';
-  $('#run-kv').innerHTML = act ? `
-    <tr><td>endpoint</td><td>http://${state.public_host}:${act.port}/v1</td></tr>
-    <tr><td>model id</td><td>${act.api_id}</td></tr>
-    <tr><td>status</td><td><span class="status s-${act.up ? 'running' : act.status}">${act.up ? 'serving' : act.status}</span></td></tr>` : '';
-  $('#run-nodes').innerHTML = ['head', 'worker'].map((k) => {
-    const n = state.nodes[k];
-    return `<tr><td>${n.name}</td><td>${fmt(n.mem_gib)} GiB free · ${n.util ?? '—'}% gpu</td></tr>`;
-  }).join('');
-  const m = stats && act ? stats.models[act.key] : null;
-  const bars = hist[act ? act.key : 'none'] || [];
-  $('#run-bars').innerHTML = bars.map((v) => `<i class="${v > 40 ? 'hi' : ''}" style="height:${Math.max(2, Math.min(46, v))}px"></i>`).join('');
-  $('#run-note').textContent = m && m.metrics ? Object.entries(m.metrics).slice(0, 3).map(([k, v]) => `${k} ${fmt(v)}`).join(' · ') : '';
+function renderConnect(s) {
+  const run = s.models.find(m => m.up);
+  document.getElementById('connect').innerHTML = `
+    <tr><th>What</th><th>Value</th></tr>
+    <tr><td>Running now</td><td>${run ? `<b>${esc(run.name)}</b> on ${run.sparks || '?'} Spark(s)` : 'nothing; press Start on a model'}</td></tr>
+    <tr><td>API address (OpenAI-compatible)</td><td><code>${esc(s.endpoint)}</code>, no key needed</td></tr>
+    <tr><td>Model id</td><td><code>${esc(s.alias)}</code> always means the running model; or ${s.models.map(m => `<code>${esc(m.api_id)}</code>`).join(' ')}</td></tr>
+    <tr><td>Apps on the dock</td><td><b>DeepSeek Harness</b> and <b>OpenCode</b> are already set up with these models.</td></tr>`;
 }
 
-async function pollStats() {
-  try { const r = await api('/api/stats'); stats = await r.json(); } catch (e) { return; }
-  ['head', 'worker'].forEach((k) => {
-    const v = Number(stats.nodes[k].mem_gib || 0);
-    hist[k] = (hist[k] || []).concat([v]).slice(-60);
-  });
-  const act = state && state.active;
-  if (act && stats.models[act]) {
-    const met = stats.models[act].metrics || {};
-    hist[act] = (hist[act] || []).concat([Number(stats.models[act].tok_per_sec || 0)]).slice(-60);
+async function renderDisk() {
+  let d;
+  try { d = await api('/api/disk'); } catch (e) { return; }
+  const rows = new Map();
+  for (const [role, entries] of Object.entries(d)) for (const e of entries) {
+    const r = rows.get(e.path) || { path: e.path, repo: e.repo, models: e.models, head: 0, worker: 0, partial: false };
+    r[role] = e.bytes; r.partial = r.partial || e.partial; rows.set(e.path, r);
   }
-  renderRunning();
+  const names = Object.fromEntries((STATE?.models || []).map(m => [m.key, m.name]));
+  const list = [...rows.values()].sort((a, b) => (b.head + b.worker) - (a.head + a.worker));
+  document.getElementById('disk').innerHTML = list.length ? `<table><tr><th>Files</th><th>Used by</th><th class="num">This Spark</th>${STATE?.two_sparks ? '<th class="num">Second Spark</th>' : ''}<th></th></tr>` +
+    list.map(r => `<tr><td>${esc(r.repo || r.path)}${r.partial ? ' <span class="sub">(partial)</span>' : ''}</td>
+      <td>${[...new Set(r.models.map(o => names[o.split(':')[0]] || o))].map(esc).join(', ') || '<span class="sub">no stack model</span>'}</td>
+      <td class="num">${r.head ? gib(r.head) : '–'}</td>${STATE?.two_sparks ? `<td class="num">${r.worker ? gib(r.worker) : '–'}</td>` : ''}
+      <td><button onclick="removeDir('${esc(r.path)}', '${esc(r.repo || r.path)}')">Remove</button></td></tr>`).join('') + '</table>'
+    : '<p class="sub">No model files yet.</p>';
 }
 
-async function act(key, what, query = '') {
-  const r = await api(`/api/models/${key}/${what}${query}`, { method: 'POST' });
-  if (!r.ok) alert((await r.json()).detail || r.statusText);
-  setTimeout(refresh, 1200);
+function render() {
+  if (!STATE) return;
+  renderNodes(STATE.nodes);
+  renderModels(STATE.models, STATE.active);
+  renderConnect(STATE);
 }
-
-async function logs(key) {
-  const el = $('#log-' + key);
-  const r = await api(`/api/models/${key}/logs?lines=120`);
-  const j = await r.json();
-  el.hidden = false;
-  el.textContent = j.lines.join('\n') || '(no log yet)';
+let diskTick = 0;
+async function refresh(forceDisk) {
+  try { STATE = await api('/api/state'); } catch (e) { if (e.message !== 'unauthorized') flash('Cannot reach the stack: ' + e.message); return; }
+  render();
+  if (forceDisk || diskTick++ % 6 === 0) renderDisk();
 }
-
-async function applyHarness() {
-  const r = await api('/api/harness/apply', { method: 'POST' });
-  const j = await r.json();
-  $('#probe-note').textContent = j.ok ? 'harness wired: ' + j.path : 'harness: ' + j.error;
+async function stats() {
+  if (!STATE) return;
+  try {
+    const s = await api('/api/stats');
+    for (const [key, v] of Object.entries(s.models)) {
+      const el = document.getElementById('tps-' + key);
+      if (el && v.tok_per_sec != null) el.textContent = `· ${v.tok_per_sec} tokens/s now`;
+    }
+  } catch (e) {}
 }
-
-refresh().then(pollStats);
-setInterval(refresh, 3000);
-setInterval(pollStats, 2000);
+refresh(true); setInterval(refresh, 5000); setInterval(stats, 3000);
 </script>
 </body>
 </html>

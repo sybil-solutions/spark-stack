@@ -1,101 +1,150 @@
-"""Model registry for the Spark stack: what to download, how to serve it, where it answers."""
+"""Model registry: four models, each with the fastest public recipe for one Spark and/or two Sparks.
+
+Every recipe here follows the MiaAI-Lab TensorFold convention: `scripts/prepare.sh` downloads the weights and the image
+(and copies them to the worker for two-Spark recipes), `PREPARE=0 PORT=<port> ./start.sh` serves, `./stop.sh` stops.
+Two-Spark recipes read WORKER (ssh target of the second Spark over the CX7 link) from the environment.
+"""
+
+from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
 
-Kind = Literal["tensorfold", "vllm"]
+
+@dataclass(frozen=True)
+class Recipe:
+    sparks: int                  # 1 or 2
+    dir: str                     # directory under vendor/ on the head
+    repo: str                    # git URL
+    commit: str                  # pinned commit
+    weights: tuple[str, ...]     # Hugging Face repos it downloads (disk accounting and progress)
+    size_gib: float              # download size on the head
+    decode: str                  # measured single-user speed, from the recipe's own README
+    env: dict[str, str] = field(default_factory=dict)
+    hf_cache: str = ".cache/huggingface"   # Hugging Face cache it uses, relative to $HOME
+    prepare: str = "scripts/prepare.sh"
+    start: str = "PREPARE=0 PORT={port} ./start.sh"
+    stop: str = "./stop.sh"
+
+    def command(self, script: str, worker: str, port: int) -> str:
+        env = dict(self.env)
+        if self.sparks == 2:
+            env["WORKER"] = worker
+        prefix = " ".join(f"{k}={v}" for k, v in env.items())
+        return f"{prefix} {script}".strip().replace("{port}", str(port))
 
 
 @dataclass(frozen=True)
 class Model:
     key: str
     name: str
-    recipe: str                 # directory under vendor/ on the head
-    kind: Kind
-    checkpoint: str
-    revision: str
+    blurb: str
     port: int
-    api_id: str
+    api_id: str                  # the id the server reports in /v1/models
     context: int
     vision: bool
-    size_gib: float
-    prepare: str                # shell command run inside the recipe dir, head-side
-    start: str
-    stop: str
-    api_key_file: str | None = None
-    notes: str = ""
-    env: dict[str, str] = field(default_factory=dict)
+    recipes: dict[int, Recipe]   # sparks -> recipe
 
-    def command(self, script: str, worker: str, port: int) -> str:
-        """WORKER plus this model's env, then the script: stop needs the same surroundings as start."""
-        env = " ".join(f"{k}={v}" for k, v in self.env.items())
-        return f"WORKER={worker} {env} {script}".replace("{port}", str(port))
+    def recipe(self, sparks: int) -> Recipe:
+        return self.recipes[sparks]
 
-    def load_command(self, worker: str, port: int) -> str:
-        return self.command(self.start, worker, port)
 
-    def stop_command(self, worker: str, port: int) -> str:
-        return self.command(self.stop, worker, port)
-
+MIA = "https://github.com/MiaAI-Lab"
 
 MODELS: dict[str, Model] = {
+    "qwen-next": Model(
+        key="qwen-next",
+        name="Qwen3.8-Flash-Next",
+        blurb="Alibaba's 180B mixture-of-experts (6B active). Fast all-rounder with vision; NVIDIA's 4-bit build.",
+        port=8889,
+        api_id="Qwen3.8-Flash-Next",
+        context=262_144,
+        vision=True,
+        recipes={
+            1: Recipe(
+                sparks=1,
+                dir="qwen-next-1x",
+                repo=f"{MIA}/Qwen3.8-Flash-Next-Single-DGX-Spark-TensorFold.git",
+                commit="656879fd752749bbd11a6e1a065a326c00940911",
+                weights=("nvidia/Qwen3.8-Flash-Next-FP4-Local",),
+                size_gib=96,
+                decode="~50 tok/s prose, ~68 code",
+            ),
+            2: Recipe(
+                sparks=2,
+                dir="qwen-next-2x",
+                repo=f"{MIA}/Qwen3.8-Flash-Dual-DGX-Sparks-TensorFold.git",
+                commit="6730319ed948cc88b525bbbdc9d309451a863834",
+                weights=("nvidia/Qwen3.8-Flash-Next-NVFP4",),
+                size_gib=124,
+                decode="67 tok/s prose",
+                env={"WORKER_WEIGHTS": "copy", "CONTEXT": "262144"},
+            ),
+        },
+    ),
+    "qwen-27b": Model(
+        key="qwen-27b",
+        name="Qwen3.8-27B",
+        blurb="Dense 27B with vision. Small and quick; speculative decoding with the DFlash2 drafter.",
+        port=8891,
+        api_id="Qwen3.8-27B",
+        context=262_144,
+        vision=True,
+        recipes={
+            1: Recipe(
+                sparks=1,
+                dir="qwen-27b-1x",
+                repo=f"{MIA}/Qwen3.8-27B-DGX-Spark-TensorFold.git",
+                commit="c11ff138871cf43d12898d79dbfa4dc952d17ca4",
+                weights=("Vontra/Qwen3.8-27B-MLX-4bit", "z-lab/Qwen3.8-27B-DFlash2"),
+                size_gib=19,
+                decode="58 tok/s prose, 137 code",
+            ),
+        },
+    ),
     "glm": Model(
         key="glm",
         name="GLM-5.3-Flash",
-        recipe="glm",
-        kind="tensorfold",
-        checkpoint="Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold",
-        revision="078455ffe6472f9a52fbc1139f58b9db2881b25c",
+        blurb="Z.ai's 320B mixture-of-experts (18B active). Strong at code and agents; needs both Sparks.",
         port=8888,
         api_id="GLM-5.3-Flash-EXL3",
-        context=1_048_576,
+        context=262_144,
         vision=True,
-        size_gib=176,
-        prepare="./scripts/prepare.sh",
-        start="PREPARE=0 PORT={port} ./start.sh",
-        stop="./stop.sh",
-        notes="MiaAI-Lab two-Spark recipe, TensorFold v0.6.0, DFlash2 drafter",
-    ),
-    "qwen": Model(
-        key="qwen",
-        name="Qwen3.8-Flash-Next",
-        recipe="qwen",
-        kind="tensorfold",
-        checkpoint="nvidia/Qwen3.8-Flash-Next-NVFP4",
-        revision="fc694b54",
-        port=8889,
-        api_id="Qwen3.8-Flash-Next",
-        context=1_048_576,
-        vision=True,
-        size_gib=124,
-        prepare="./scripts/prepare.sh",
-        start="PREPARE=0 PORT={port} ./start.sh",
-        stop="./stop.sh",
-        notes="MiaAI-Lab two-Spark recipe, TensorFold zig-flashnext, NVFP4",
+        recipes={
+            2: Recipe(
+                sparks=2,
+                dir="glm-2x",
+                repo=f"{MIA}/GLM-5.3-Flash-EXL3-2x-DGX-Sparks-TensorFold.git",
+                commit="3fd60dfc836fab0f1ed0fd4f0afaf2a1d62b2aab",
+                weights=("Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold", "incoai/GLM-5.3-Flash-DFlash2"),
+                size_gib=166,
+                decode="60 tok/s prose, 115 structured",
+                env={"WORKER_WEIGHTS": "copy", "CONTEXT": "262144"},
+            ),
+        },
     ),
     "deepseek": Model(
         key="deepseek",
         name="DeepSeek-V4.1-Flash-1017",
-        recipe="dsv41-1017",
-        kind="vllm",
-        checkpoint="0xSero/DeepSeek-V4.1-Flash-1017-EXL3-2.7bpw",
-        revision="e34ef55b",
-        port=8000,
-        api_id="deepseek-v4.1-flash-1017",
+        blurb="DeepSeek's newest Flash model. The smartest of the four; needs both Sparks and ~500 GB of disk.",
+        port=8890,
+        api_id="DeepSeek-V4.1-Flash-1017",
         context=262_144,
-        vision=False,           # the launcher is text-only by default (TEXT_ONLY=1)
-        size_gib=402,           # 199 GB checkpoint + 203 GB of DeepSeek's own Engram shards
-        prepare="MODEL_DIR=$HOME/models/dsv41-1017-exl3 python3 ~/spark-stack/scripts/fetch-dsv41-1017.py",
-        start="scripts/launch/dsv41_tp2.sh up",
-        stop="scripts/launch/dsv41_tp2.sh down",
-        notes="sudoxing launcher cc59c360 + ghcr.io/sybil-solutions/deepseek-v4.1-flash-exl3-spark@sha256:5817414f",
-        env={
-            "IMAGE": "ghcr.io/sybil-solutions/deepseek-v4.1-flash-exl3-spark@sha256:5817414f92e9bec0406dfc4575e16b282209f0cb1ead16fe53d51bac7ac9e9e4",
-            "MODEL_DIR": "$HOME/models/dsv41-1017-exl3",
-            "SERVED": "deepseek-v4.1-flash-1017",
-            "HEAD": "localhost",        # the launcher runs on the head and ssh's to both ranks
-            "FAB_IF": "enp1s0f1np1",
-            "FAB_HCA": "rocep1s0f1",
+        vision=True,
+        recipes={
+            2: Recipe(
+                sparks=2,
+                dir="deepseek-2x",
+                repo=f"{MIA}/DeepSeek-v4.1-Flash-1017-2x-DGX-Sparks.git",
+                commit="370daf0cc38f348516a98ebab38f6053858eab1f",
+                weights=("Mia-AiLab/DeepSeek-V4.1-Flash-1017-EXL3-EAQ-v1-2.9-bpw", "deepseek-ai/DeepSeek-V4.1-Flash-1017"),
+                size_gib=385,
+                decode="75 tok/s prose, 110 code",
+                env={"CONTEXT": "262144", "HF_CACHE": "$HOME/.cache/spark-stack-hf"},
+                hf_cache=".cache/spark-stack-hf",
+            ),
         },
     ),
 }
+
+# Downloaded automatically by install.sh, so the boxes are useful before anyone clicks anything.
+DEFAULT_MODEL = ("qwen-next", 2)
