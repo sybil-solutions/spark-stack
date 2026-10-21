@@ -127,7 +127,7 @@ else
 fi
 
 wsudo() {   # run a root script on the second Spark: sudo -n when it needs no password, else feed it the password
-  if ssh "${SSHO[@]}" "$BOOT" sudo -n true 2>/dev/null; then
+  if ssh -n "${SSHO[@]}" "$BOOT" sudo -n true 2>/dev/null; then   # -n: stdin is the script for the next ssh
     ssh "${SSHO[@]}" "$BOOT" "sudo -n bash -s -- $*"
   else
     [ -n "$PW" ] || die "the second Spark needs a sudo password; run this installer from a terminal"

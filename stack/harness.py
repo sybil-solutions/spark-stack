@@ -29,7 +29,7 @@ def models() -> list[dict]:
 
 def dsh_block(base_url: str) -> str:
     lines = [BEGIN,
-             "- id: llm-pi-ai-spark-stack",
+             "- id: llm-pi-ai",
              '  name: "@deepseek-ai/dsh-llm-pi-ai"',
              "  config:",
              "    providers:",
