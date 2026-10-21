@@ -34,7 +34,7 @@ if [ -S "/run/user/$uid/bus" ]; then
   export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus"
   favs=$(gsettings get org.gnome.shell favorite-apps | python3 -c 'import ast,sys
 s=sys.stdin.read().strip().removeprefix("@as ")
-print(repr([a for a in ast.literal_eval(s) if a not in ("spark-stack.desktop","spark-dsh.desktop") and not a.startswith("opencode")]))')
+print(repr([a for a in ast.literal_eval(s) if a not in ("spark-stack.desktop","spark-dsh.desktop") and "opencode" not in a]))')
   gsettings set org.gnome.shell favorite-apps "$favs"
 fi
 
