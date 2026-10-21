@@ -31,7 +31,8 @@ git clone https://github.com/sybil-solutions/spark-stack.git ~/spark-stack && cd
 mkdir -p vendor && (cd vendor && \
   git clone --depth 1 https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks-TensorFold.git glm && \
   git clone --depth 1 https://github.com/MiaAI-Lab/Qwen3.8-Flash-Dual-DGX-Sparks-TensorFold.git qwen && \
-  git clone --depth 1 https://github.com/0xSero/DeepSeek-V4.1-Flash-Two-Sparks.git deepseek)
+  git clone https://github.com/sudoingX/dgx-spark-deepseek-v41.git dsv41-1017 && \
+  git -C dsv41-1017 checkout --detach cc59c360)
 ./deploy.sh build
 WORKER=valentine@10.10.10.13 ./deploy.sh run     # worker's fabric address
 ```
