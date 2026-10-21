@@ -30,7 +30,7 @@ OPENCODE_VERSION=v1.19.3
 HEAD_IPS=(192.168.100.10 192.168.101.10)
 WORKER_IPS=(192.168.100.11 192.168.101.11)
 U=$(id -un)
-SSHO=(-o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new)
+SSHO=(-o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=10 -o ServerAliveCountMax=3)
 
 n=0
 step() { n=$((n + 1)); printf '\n\033[1m[%s/9] %s\033[0m\n' "$n" "$*"; }
@@ -105,23 +105,24 @@ elif [ -n "${WORKER:-}" ]; then
 elif [[ "$(ibdev2netdev 2>/dev/null || true)" != *"(Up)"* ]]; then
   info "no QSFP cable link: setting up this Spark only"
 else
+  # Manage the second Spark over Tailscale when possible: the CX7 link itself is reconfigured during setup.
+  mapfile -t CANDS < <(tailnet_sparks)
   LL=$(link_peer)
-  if [ -n "$LL" ] && ssh -n "${SSHO[@]}" "$U@$LL" true 2>/dev/null; then
-    BOOT="$U@$LL"
+  if [ "${#CANDS[@]}" -gt 1 ] && [ -n "$LL" ]; then   # several Sparks on the tailnet: keep the one on our cable
+    llhost=$(ssh -n "${SSHO[@]}" "$U@$LL" hostname 2>/dev/null || true)
+    for c in "${CANDS[@]}"; do [ -n "$llhost" ] && [[ "${c#*@}" == "$llhost"* ]] && CANDS=("$c"); done
+  fi
+  if [ "${#CANDS[@]}" -eq 1 ]; then
+    BOOT=${CANDS[0]}
+  elif [ "${#CANDS[@]}" -gt 1 ]; then
+    info "more than one Spark answers on the tailnet: ${CANDS[*]}"
+    read -rp "  Which one is on the other end of the cable? " BOOT </dev/tty || true
+    [ -n "$BOOT" ] || die "run again with WORKER=$U@<that Spark>"
+    [[ "$BOOT" == *@* ]] || BOOT="$U@$BOOT"
+  elif [ -n "$LL" ]; then
+    BOOT="$U@$LL"     # no Tailscale SSH: reach it on the cable (setup applies its CX7 addresses detached)
   else
-    mapfile -t CANDS < <(tailnet_sparks)
-    if [ "${#CANDS[@]}" -eq 1 ]; then
-      BOOT=${CANDS[0]}
-    elif [ "${#CANDS[@]}" -gt 1 ]; then
-      info "more than one Spark answers on the tailnet: ${CANDS[*]}"
-      read -rp "  Which one is on the other end of the cable? " BOOT </dev/tty || true
-      [ -n "$BOOT" ] || die "run again with WORKER=$U@<that Spark>"
-      [[ "$BOOT" == *@* ]] || BOOT="$U@$BOOT"
-    elif [ -n "$LL" ]; then
-      BOOT="$U@$LL"
-    else
-      die "the QSFP link is up but the Spark on the other end was not found; run again with WORKER=$U@<its Tailscale name or IP>"
-    fi
+    die "the QSFP link is up but the Spark on the other end was not found; run again with WORKER=$U@<its Tailscale name or IP>"
   fi
   info "the second Spark is reached through $BOOT"
 fi
@@ -156,9 +157,10 @@ fi
 # ------------------------------------------------------------------------------------------------ both nodes
 step "System setup (sleep off, docker, CX7 link, model sharing)"
 if [ -n "$BOOT" ]; then
-  wsudo "$U worker ${WORKER_IPS[*]}" < "$STACK_DIR/scripts/node-setup.sh"
+  detach=""; [[ "$BOOT" != *%* ]] || detach="- - detach"
+  wsudo "$U worker ${WORKER_IPS[*]} $detach" < "$STACK_DIR/scripts/node-setup.sh"
   printf '%s\n' "$PW" | sudo -S -p '' bash "$STACK_DIR/scripts/node-setup.sh" "$U" head "${HEAD_IPS[@]}" "${WORKER_IPS[@]}"
-  for i in $(seq 1 20); do ping -c1 -W1 "${WORKER_IPS[0]}" >/dev/null 2>&1 && break; sleep 1; done
+  for i in $(seq 1 60); do ping -c1 -W1 "${WORKER_IPS[0]}" >/dev/null 2>&1 && break; sleep 1; done
   ssh "${SSHO[@]}" "$WORKER_TARGET" true || die "ssh to the second Spark over the CX7 link ($WORKER_TARGET) failed"
   ssh "${SSHO[@]}" "$WORKER_TARGET" "ssh-keyscan -q ${HEAD_IPS[0]} >> ~/.ssh/known_hosts 2>/dev/null; true"
   info "CX7 link up: $(hostname)=${HEAD_IPS[0]}  $WORKER_HOST=${WORKER_IPS[0]}"

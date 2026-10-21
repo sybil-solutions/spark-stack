@@ -3,7 +3,8 @@
 #   node-setup.sh <user> <role: head|worker|single> [<ip for the first CX7 twin> <ip for the second> [<peer ip> <peer ip>]]
 # Idempotent: re-running converges to the same state.
 set -euo pipefail
-U=$1 ROLE=$2 IP_A=${3:-} IP_B=${4:-} PEER_A=${5:-} PEER_B=${6:-}
+U=$1 ROLE=$2 IP_A=${3:-} IP_B=${4:-} PEER_A=${5:-} PEER_B=${6:-} DETACH=${7:-}
+[ "$PEER_A" != - ] || PEER_A="" PEER_B=""
 UHOME=$(getent passwd "$U" | cut -d: -f6)
 say() { printf '  [%s] %s\n' "$(hostname)" "$*"; }
 
@@ -58,7 +59,11 @@ network:
       dhcp6: false
 EOF
   chmod 600 /etc/netplan/40-spark-stack-cx7.yaml
-  netplan apply 2>/dev/null
+  if [ "$DETACH" = detach ]; then   # we were reached over this very link: apply after the ssh session has returned
+    setsid -f sh -c 'sleep 2; netplan apply' >/dev/null 2>&1
+  else
+    netplan apply 2>/dev/null
+  fi
   say "CX7 link: ${UP[0]}=$IP_A ${UP[1]}=$IP_B"
 fi
 
