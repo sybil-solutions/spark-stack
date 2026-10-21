@@ -27,7 +27,7 @@ Nothing needs the docker socket: `docker` runs on the host, where the recipes ex
 
 ```bash
 # on the head Spark
-git clone <this repo> ~/spark-stack && cd ~/spark-stack
+git clone https://github.com/sybil-solutions/spark-stack.git ~/spark-stack && cd ~/spark-stack
 mkdir -p vendor && (cd vendor && \
   git clone --depth 1 https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks-TensorFold.git glm && \
   git clone --depth 1 https://github.com/MiaAI-Lab/Qwen3.8-Flash-Dual-DGX-Sparks-TensorFold.git qwen && \
