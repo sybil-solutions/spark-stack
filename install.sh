@@ -36,6 +36,10 @@ n=0
 step() { n=$((n + 1)); printf '\n\033[1m[%s/9] %s\033[0m\n' "$n" "$*"; }
 info() { printf '  %s\n' "$*"; }
 die() { printf '\n\033[31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+fetch() {   # download to a file, resuming and retrying: the Sparks may be on Wi-Fi
+  curl -fsSL --retry 8 --retry-all-errors --retry-delay 3 -C - -o "$2.part" "$1" || curl -fsSL --retry 8 --retry-all-errors -o "$2.part" "$1"
+  mv "$2.part" "$2"
+}
 
 main() {   # the whole run lives in one function: bash reads it completely before ssh can swallow a piped script
 [ "$(id -u)" -ne 0 ] || die "run this as your normal desktop user, not root (it asks for your password)"
@@ -77,7 +81,7 @@ PUB=$(cat ~/.ssh/id_ed25519.pub)
 
 link_peer() {   # the IPv6 link-local address of whatever is on the other end of the CX7 cable, when it has one
   local ifc
-  ifc=$(ibdev2netdev 2>/dev/null | awk '/\(Up\)/ {print $5}' | sort | head -1)
+  ifc=$(ibdev2netdev 2>/dev/null | awk '/\(Up\)/ {print $5}' | sort | head -1 || true)
   [ -n "$ifc" ] || return 0
   ping -6 -c 2 -W 1 "ff02::1%$ifc" >/dev/null 2>&1 || true
   ip -6 neigh show dev "$ifc" | awk '/^fe80/ && !/FAILED/ {print $1; exit}' | sed "s/\$/%$ifc/"
@@ -98,7 +102,7 @@ if [ "${SINGLE:-0}" = 1 ]; then
   info "SINGLE=1: setting up this Spark only"
 elif [ -n "${WORKER:-}" ]; then
   BOOT=$WORKER
-elif ! ibdev2netdev 2>/dev/null | grep -q '(Up)'; then
+elif [[ "$(ibdev2netdev 2>/dev/null || true)" != *"(Up)"* ]]; then
   info "no QSFP cable link: setting up this Spark only"
 else
   LL=$(link_peer)
@@ -169,14 +173,15 @@ ssh "${SSHO[@]}" localhost true || die "ssh localhost does not work (is openssh-
 
 # ------------------------------------------------------------------------------------------------ tools
 step "Tools (Hugging Face CLI, Node.js, DeepSeek harness, OpenCode)"
-hf_cli='command -v ~/.local/bin/hf >/dev/null 2>&1 || { command -v ~/.local/bin/uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1; ~/.local/bin/uv tool install -q "huggingface_hub[hf_xet]"; }; ~/.local/bin/hf version 2>/dev/null | head -1'
+hf_cli='command -v ~/.local/bin/hf >/dev/null 2>&1 || { command -v ~/.local/bin/uv >/dev/null 2>&1 || curl -LsSf --retry 5 --retry-all-errors https://astral.sh/uv/install.sh | sh >/dev/null 2>&1; ~/.local/bin/uv tool install -q "huggingface_hub[hf_xet]"; }; ~/.local/bin/hf version 2>/dev/null | sed -n "s/.*version: //p"'
 info "hf here: $(bash -c "$hf_cli")"
 [ -z "$BOOT" ] || info "hf on $WORKER_HOST: $(ssh "${SSHO[@]}" "$WORKER_TARGET" "$hf_cli")"
 
 NODE_DIR=/opt/spark-stack-node
 if [ "$("$NODE_DIR/bin/node" --version 2>/dev/null)" != "$NODE_VERSION" ]; then
   tmp=$(mktemp -d)
-  curl -fsSL "https://nodejs.org/dist/$NODE_VERSION/node-$NODE_VERSION-linux-arm64.tar.xz" | tar -xJ -C "$tmp"
+  fetch "https://nodejs.org/dist/$NODE_VERSION/node-$NODE_VERSION-linux-arm64.tar.xz" "$tmp/node.tar.xz"
+  tar -xJf "$tmp/node.tar.xz" -C "$tmp"
   sudo rm -rf "$NODE_DIR" && sudo mv "$tmp/node-$NODE_VERSION-linux-arm64" "$NODE_DIR" && rm -rf "$tmp"
 fi
 if [ "$("$NODE_DIR/bin/dsh" --version 2>/dev/null | tail -1)" != "$DSH_VERSION" ]; then
@@ -186,12 +191,12 @@ info "DeepSeek harness $("$NODE_DIR/bin/dsh" --version 2>/dev/null | tail -1)"
 
 OC_DEB=/tmp/opencode-desktop-$OPENCODE_VERSION-arm64.deb
 OC_PKG=""
-[ -s "$OC_DEB" ] || curl -fsSL -o "$OC_DEB" "https://github.com/anomalyco/opencode/releases/download/$OPENCODE_VERSION/opencode-desktop-linux-arm64.deb"
+[ -s "$OC_DEB" ] || fetch "https://github.com/anomalyco/opencode/releases/download/$OPENCODE_VERSION/opencode-desktop-linux-arm64.deb" "$OC_DEB"
 OC_PKG=$(dpkg-deb -f "$OC_DEB" Package)
 if [ "$(dpkg-query -W -f '${Version}' "$OC_PKG" 2>/dev/null)" != "$(dpkg-deb -f "$OC_DEB" Version)" ]; then
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$OC_DEB" >/dev/null 2>&1 || die "OpenCode install failed"
 fi
-OC_DESKTOP=$(dpkg -L "$OC_PKG" | grep -m1 '/applications/.*\.desktop$' | xargs -r basename)
+OC_DESKTOP=$(dpkg -L "$OC_PKG" | grep '/applications/.*\.desktop$' | head -1 | xargs -r basename || true)
 info "OpenCode $(dpkg-query -W -f '${Version}' "$OC_PKG") ($OC_DESKTOP)"
 
 # ------------------------------------------------------------------------------------------------ recipes

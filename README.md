@@ -1,127 +1,89 @@
-# spark stack
+# Spark Stack
 
-One container that prepares, serves, frees, and reports on three models across **two DGX Sparks**, and wires them
-into the DeepSeek harness (`dsh`).
-
-| model | recipe | checkpoint | port |
-|---|---|---|---|
-| GLM-5.3-Flash | `MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks-TensorFold` | `Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold` (176 GB) | 8888 |
-| Qwen3.8-Flash-Next | `MiaAI-Lab/Qwen3.8-Flash-Dual-DGX-Sparks-TensorFold` | `nvidia/Qwen3.8-Flash-Next-NVFP4` (124 GB) | 8889 |
-| DeepSeek-V4.1-Flash-1017 | `sudoingX/dgx-spark-deepseek-v41` @ `cc59c360` | `0xSero/DeepSeek-V4.1-Flash-1017-EXL3-2.7bpw` (199 GB) + DeepSeek Engram shards (203 GB) | 8000 |
-
-Only one model is resident at a time: each needs ~98 GiB per Spark and both ranks own the whole fabric.
-
-## How it works
-
-The container is a control plane, not a serving runtime. It runs on the **head** Spark with the host network and the
-host home mounted at the same path, so it uses the host's own ssh keys:
-
-- head actions go through `ssh localhost` (the host's sshd),
-- worker actions go through the recipe's own `ssh $WORKER docker …`,
-- each recipe is vendored under `vendor/` and driven by its own `start.sh` / `stop.sh` / `scripts/prepare.sh`,
-  unchanged, so the maintainers' preflight checks (RoCE rails, memory floor, port, image digest) still run.
-
-Nothing needs the docker socket: `docker` runs on the host, where the recipes expect it.
-
-## Run
+One command turns one or two NVIDIA DGX Sparks (or GB10 boxes such as the ASUS Ascent GX10) into a local AI lab:
+a web app to download, start and stop models, two agent harnesses already pointed at them, and one API address that
+always reaches whatever model is running.
 
 ```bash
-# on the head Spark
-git clone https://github.com/sybil-solutions/spark-stack.git ~/spark-stack && cd ~/spark-stack
-mkdir -p vendor && (cd vendor && \
-  git clone --depth 1 https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks-TensorFold.git glm && \
-  git clone --depth 1 https://github.com/MiaAI-Lab/Qwen3.8-Flash-Dual-DGX-Sparks-TensorFold.git qwen && \
-  git clone https://github.com/sudoingX/dgx-spark-deepseek-v41.git dsv41-1017 && \
-  git -C dsv41-1017 checkout --detach cc59c360)
-./deploy.sh build
-WORKER=valentine@10.10.10.13 ./deploy.sh run     # worker's fabric address
+curl -fsSL https://raw.githubusercontent.com/sybil-solutions/spark-stack/main/install.sh | bash
 ```
 
-Open `http://<tailnet-ip>:8099` and paste the token from `~/spark-stack-state/token` (the controller holds the host's
-ssh keys, so every `/api` call needs it). The UI has four panes, matching the wireframes: **connect** (the two nodes and the
-fabric link), **hardware** (per-node facts), **models** (three cards: load / free / fetch / log), **running**
-(endpoint, live counters, node memory).
+Run it on the Spark you sit at, as your normal desktop user; it asks for your password once. With a QSFP cable to a
+second Spark (same username and password on both, both on the same Tailscale network) it finds that Spark and sets it up
+too. Running the same command again repairs an install. `~/spark-stack/uninstall.sh` removes it (weights are kept unless
+`--weights`).
 
-The listener is bound to **one interface** — `tailscale ip -4` on the head, so `http://<tailnet-ip>:8099` only.
-`deploy.sh` and the entrypoint fail closed: no tailnet address means no start (they never fall back to a LAN/WAN
-interface), and `STACK_BIND` is accepted only for `100.64.0.0/10` (tailnet) or `127.0.0.0/8` (loopback). `0.0.0.0`
-is refused. The LAN (`192.168.0.x`), the fabric (`10.10.10.x`) and the WAN never answer on 8099.
+## Models
 
-`wire harness` writes the three providers into `~/.dsh/profiles/web/cordis.patch.yml` and prints the YAML it wrote.
+The fastest public recipe for each model and Spark count, all [MiaAI-Lab](https://github.com/MiaAI-Lab) TensorFold
+recipes, pinned by commit in [`stack/registry.py`](stack/registry.py). Speeds are the recipes' own single-user
+measurements.
 
-## API
+| Model | 1 Spark | 2 Sparks | Download | Port |
+|---|---|---|---|---|
+| Qwen3.8-Flash-Next (180B-A6B, vision) | [Single-DGX-Spark-TensorFold](https://github.com/MiaAI-Lab/Qwen3.8-Flash-Next-Single-DGX-Spark-TensorFold): ~50 tok/s | [Dual-DGX-Sparks-TensorFold](https://github.com/MiaAI-Lab/Qwen3.8-Flash-Dual-DGX-Sparks-TensorFold): 67 tok/s | 96 / 124 GiB (NVIDIA NVFP4) | 8889 |
+| Qwen3.8-27B (dense, vision, DFlash2 drafts) | [27B-DGX-Spark-TensorFold](https://github.com/MiaAI-Lab/Qwen3.8-27B-DGX-Spark-TensorFold): 58 prose, 137 code | not needed | 19 GiB | 8891 |
+| GLM-5.3-Flash (320B-A18B, vision) | not offered (2-bit only, 10-25 tok/s) | [EXL3-2x-DGX-Sparks-TensorFold](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks-TensorFold): 60 prose, 115 structured | 166 GiB | 8888 |
+| DeepSeek-V4.1-Flash-1017 | does not fit | [1017-2x-DGX-Sparks](https://github.com/MiaAI-Lab/DeepSeek-v4.1-Flash-1017-2x-DGX-Sparks): 75 prose, 110 code | 385 GiB | 8890 |
+
+Install starts the Qwen3.8-Flash-Next download (two-Spark build, or the one-Spark build on a single Spark). Everything
+else downloads when someone presses **Download** or **Start**. One model runs at a time.
+
+## What the installer does
+
+1. Finds the second Spark: on the QSFP cable, else the one tailnet machine with a live CX7 link that answers Tailscale
+   SSH; `WORKER=user@host` overrides, `SINGLE=1` skips it.
+2. On both Sparks ([`scripts/node-setup.sh`](scripts/node-setup.sh)): turns sleep off, adds the user to `docker`,
+   addresses both logical twins of the cabled CX7 port (`192.168.100.10/11`, `192.168.101.10/11`), installs `rsync`
+   and NFS, and shares DeepSeek's weights-only cache (`~/.cache/spark-stack-hf`) read-only to the worker's CX7
+   addresses.
+3. Installs the `hf` CLI (both Sparks), Node.js and the DeepSeek harness (`/opt/spark-stack-node`, service
+   `spark-stack-dsh`, web UI on `127.0.0.1:3080`), and the OpenCode desktop app.
+4. Clones each recipe at its pinned commit into `~/spark-stack/vendor/`.
+5. Builds and starts the `spark-stack` container (restarts with the machine), bound to this Spark's Tailscale address
+   only: `http://<tailscale-ip>:8099`.
+6. Writes the models into the DeepSeek harness (`~/.dsh/profiles/web/cordis.patch.yml`, managed block) and OpenCode
+   (`~/.config/opencode/opencode.json`, provider `spark`), and pins **Spark Stack**, **DeepSeek Harness** and
+   **OpenCode** to the dock.
+
+## The app
+
+`http://<tailscale-ip>:8099`. On the Spark itself it opens without a key; from another tailnet machine paste the key
+from `~/spark-stack-state/token` once. Each model card has a **1 Spark / 2 Sparks** choice, **Download** with a
+progress bar, **Start/Stop**, and the live log. **Disk** lists the model folders on both Sparks with a **Remove** button.
+
+## One API for every app
+
+`http://<tailscale-ip>:8099/v1` is OpenAI-compatible and needs no key. Model id `spark` goes to whatever is running;
+each model's own id (`Qwen3.8-Flash-Next`, `Qwen3.8-27B`, `GLM-5.3-Flash-EXL3`, `DeepSeek-V4.1-Flash-1017`) goes to
+that model and gets a clear `503` when it is not running.
 
 | method | path | purpose |
 |---|---|---|
-| GET | `/api/state` | nodes, models, active, harness routes |
-| GET | `/api/stats` | live node facts and per-model metrics |
-| POST | `/api/models/{glm,qwen,deepseek}/prepare` | download weights and image on both Sparks |
-| POST | `/api/models/{id}/load` | start both ranks, refuse if another model serves |
-| POST | `/api/models/{id}/unload` | stop both ranks |
-| GET | `/api/models/{id}/logs?lines=120` | tail of the running job |
-| POST | `/api/harness/apply` | write the dsh provider routes into the profile layer |
+| GET | `/api/state` | machines, models, download progress, what is running |
+| POST | `/api/models/{key}/prepare?sparks=1\|2` | download |
+| POST | `/api/models/{key}/load?sparks=1\|2` | start (downloads what is missing first) |
+| POST | `/api/models/{key}/unload` | stop |
+| GET | `/api/models/{key}/logs` | the job log |
+| GET | `/api/disk` | model folders on each Spark |
+| POST | `/api/disk/remove` | `{"path": ...}` remove a model folder from both Sparks |
+| GET | `/api/stats` | live tokens a second, power, memory |
 
-All `/api` routes require `Authorization: Bearer $(cat ~/spark-stack-state/token)`; the page itself carries no token.
+Keys: `qwen-next`, `qwen-27b`, `glm`, `deepseek`.
 
-## Notes
+## Recovery
 
-- **Qwen has no Mia checkpoint**: "TensorFold by Mia" is the recipe and image publisher; the weights are NVIDIA's
-  NVFP4 build. The registry pins `nvidia/Qwen3.8-Flash-Next-NVFP4@fc694b54`.
-- **DeepSeek is the 1017 2.7 bpw pair**: `0xSero/DeepSeek-V4.1-Flash-1017-EXL3-2.7bpw` (199 GB, 2.70 bpw) served by
-  sudoingX's launcher at `cc59c360` with the pinned `ghcr.io/sybil-solutions/deepseek-v4.1-flash-exl3-spark` image.
-  The Engram tables are not in the checkpoint: `scripts/fetch-dsv41-1017.py` pulls DeepSeek's two shards at
-  `1bae0e10` into the same directory, verifies `MANIFEST.sha256`, then rsyncs the whole verified tree to `$WORKER`
-  over the fabric and runs `sha256sum -c` there too, because the pinned launcher reads `MODEL_DIR` on both ranks.
-  `--sync-only` re-copies without downloading. Nothing is fetched until the card's `fetch` is pressed.
-- Weights are prepared by each recipe's own `prepare.sh`/`download.sh`, which verify hashes and copy to the worker
-  over the fabric.
-- The controller never writes into the recipe trees; state and job logs live in `~/spark-stack-state/`.
+- Something looks stuck: **Stop** the model in the app, then **Start** it again.
+- The app does not open: `sudo docker restart spark-stack`.
+- Anything else, or after an OS update: run the install command again.
 
-## Verified on spark-2384 (head) + spark-557f (worker)
+## Test
 
-```
-$ TOKEN=$(cat ~/spark-stack-state/token) bash tests/e2e.sh http://$(tailscale ip -4 | head -1):8099 glm
-== state
-  head   spark-2384 reachable 11 GiB
-  worker 10.10.10.13 reachable 14 GiB
-== load glm
-  endpoint up
-== completion
-  model=GLM-5.3-Flash-EXL3 completion_tokens=85 text='stack ok'
-== stats
-  active: glm
-  up: glm metrics
-== unload glm
-  down
-PASS
-```
+On the head, with weights downloaded: `tests/e2e.sh qwen-next 2` starts the model, chats through `/v1` by id and by
+`spark`, checks a stopped model returns 503, and stops it.
 
-Qwen passes the same way (`tests/e2e.sh … qwen`: 31 tokens, `stack ok`, unload down).
+## Credits
 
-`tests/harness.sh` passes too: `dsh 0.2.1-rc.2` is in the image, the patch keeps the user's existing routes and adds
-`spark-glm`, `spark-qwen`, `spark-deepseek`.
-
-## Weights
-
-| model | on the head | on the worker |
-|---|---|---|
-| GLM | cached | cached |
-| Qwen | downloading (`~/qwen-dl.log`) | cached |
-| DeepSeek | not fetched (manual) | not fetched (manual) |
-
-`scripts/chain-after-downloads.sh` runs on the head: when the Qwen download ends it calls `prepare` (verify + copy to
-the worker over the fabric) and stops there. **DeepSeek is not fetched automatically** — press `fetch` on its card.
-Its download is 462 GB resident: 240 GB of EXL3 banks plus 222 GB of base shards, ~203 GB of which arrives as
-`.partNN` files that reassemble into the two Engram shards and are deleted; peak disk while reassembling is ~665 GB.
-
-## A local image can be a trap
-
-`prepare.sh` accepts any locally built image whose tag matches, and only checks the tag — it does not know whether
-that build loads. On 2026-10-20 an image rebuilt that morning passed `prepare.sh` ("kernel set present") and then
-died at load with `tensorfold-native … (LinkReadFailed)`, while the six-day-old build still served. Two ways out,
-both wired into the UI:
-
-```
-POST /api/models/{id}/prepare?mode=pull      # PULL=1: take the published GHCR image instead of the local build
-POST /api/models/{id}/prepare?mode=rebuild   # prepare.sh --rebuild: rebuild with the pinned patches
-```
+Recipes, engines and images: [MiaAI-Lab](https://github.com/MiaAI-Lab) (TensorFold). Weights: NVIDIA, Vontra, z-lab,
+Mia-AiLab, incoai, DeepSeek. Harnesses: [DeepSeek harness](https://www.npmjs.com/package/@deepseek-ai/dsh),
+[OpenCode](https://github.com/anomalyco/opencode).
