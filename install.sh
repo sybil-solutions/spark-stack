@@ -36,10 +36,16 @@ n=0
 step() { n=$((n + 1)); printf '\n\033[1m[%s/9] %s\033[0m\n' "$n" "$*"; }
 info() { printf '  %s\n' "$*"; }
 die() { printf '\n\033[31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
-fetch() {   # download to a file, resuming and retrying: the Sparks may be on Wi-Fi
-  curl -fsSL --retry 8 --retry-all-errors --retry-delay 3 -C - -o "$2.part" "$1" || curl -fsSL --retry 8 --retry-all-errors -o "$2.part" "$1"
-  mv "$2.part" "$2"
+fetch() {   # download to a file, resuming after drops: the Sparks may be on busy Wi-Fi
+  local i
+  for i in $(seq 1 30); do
+    curl -fsSL --connect-timeout 15 --speed-limit 20000 --speed-time 60 -C - -o "$2.part" "$1" 2>/dev/null && { mv "$2.part" "$2"; return 0; }
+    sleep 3
+  done
+  die "could not download $1 (network); run the installer again to resume"
 }
+trap 'printf "\n\033[31mERROR:\033[0m the installer stopped at line %s; run it again to resume\n" "$LINENO" >&2' ERR
+set -E
 
 main() {   # the whole run lives in one function: bash reads it completely before ssh can swallow a piped script
 [ "$(id -u)" -ne 0 ] || die "run this as your normal desktop user, not root (it asks for your password)"
