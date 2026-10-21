@@ -10,7 +10,7 @@ STATE=$HOME/spark-stack-state
 SSHO=(-o BatchMode=yes -o ConnectTimeout=6)
 say() { printf '  %s\n' "$*"; }
 
-sudo -v
+sudo true   # asks for the password once (sudo -v would insist on one even where sudo needs none)
 WORKER=$(sudo docker inspect spark-stack --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | sed -n 's/^STACK_WORKER=//p')
 
 echo "Stopping models"
