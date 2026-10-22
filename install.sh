@@ -275,9 +275,14 @@ sudo systemctl enable -q spark-stack-dsh.service
 sudo systemctl restart spark-stack-dsh.service
 
 cp "$STACK_DIR"/assets/*.svg ~/.local/share/icons/
+# The two apps open in their own windows (desktop/webapp.py: GTK + WebKit, both preinstalled on DGX OS).
+dpkg -s python3-gi gir1.2-webkit2-4.1 >/dev/null 2>&1 \
+  || sudo DEBIAN_FRONTEND=noninteractive timeout 600 apt-get install -y -qq python3-gi gir1.2-webkit2-4.1 >/dev/null 2>&1 \
+  || info "GTK WebKit not installable; the apps will open in the browser instead"
 cat > ~/.local/bin/spark-stack-open <<EOF
 #!/bin/sh
-exec xdg-open "http://$TS_IP:$PORT/"
+exec /usr/bin/python3 -W ignore "$STACK_DIR/desktop/webapp.py" spark-stack "Spark Stack" \\
+  "$HOME/.local/share/icons/spark-stack.svg" "http://$TS_IP:$PORT/"
 EOF
 cat > ~/.local/bin/spark-dsh-open <<EOF
 #!/bin/sh
@@ -285,7 +290,9 @@ cat > ~/.local/bin/spark-dsh-open <<EOF
 log="$HOME/.local/state/spark-stack/dsh-web.log"
 i=0; while [ \$i -lt 40 ] && ! curl -s -o /dev/null -m 1 http://127.0.0.1:3080/; do i=\$((i+1)); sleep 0.25; done
 url=\$(sed -n 's/^dsh web: //p' "\$log" | tail -n 1)
-exec xdg-open "\${url:-http://127.0.0.1:3080/}"
+# the sign-in URL carries a token: hand it over on stdin, not argv (argv shows in every process listing)
+printf '%s\n' "\${url:-http://127.0.0.1:3080/}" | exec /usr/bin/python3 -W ignore "$STACK_DIR/desktop/webapp.py" \\
+  spark-dsh "DeepSeek Harness" "$HOME/.local/share/icons/spark-dsh.svg" -
 EOF
 chmod 700 ~/.local/bin/spark-stack-open ~/.local/bin/spark-dsh-open
 cat > ~/.local/share/applications/spark-stack.desktop <<EOF
@@ -295,6 +302,7 @@ Name=Spark Stack
 Comment=Download, start and stop local AI models
 Exec=$HOME/.local/bin/spark-stack-open
 Icon=$HOME/.local/share/icons/spark-stack.svg
+StartupWMClass=spark-stack
 Categories=Development;
 Terminal=false
 EOF
@@ -305,6 +313,7 @@ Name=DeepSeek Harness
 Comment=AI agent that works with the local models
 Exec=$HOME/.local/bin/spark-dsh-open
 Icon=$HOME/.local/share/icons/spark-dsh.svg
+StartupWMClass=spark-dsh
 Categories=Development;
 Terminal=false
 EOF

@@ -30,6 +30,7 @@ pkg=$(dpkg-query -W -f '${Package}\n' 'opencode*' 2>/dev/null | head -1 || true)
 rm -f ~/.local/share/applications/spark-stack.desktop ~/.local/share/applications/spark-dsh.desktop \
       ~/.local/share/icons/spark-stack.svg ~/.local/share/icons/spark-dsh.svg \
       ~/.local/bin/spark-stack-open ~/.local/bin/spark-dsh-open
+rm -rf ~/.local/share/spark-stack/webapp
 uid=$(id -u)
 if [ -S "/run/user/$uid/bus" ]; then
   export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus"
