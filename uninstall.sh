@@ -11,7 +11,8 @@ SSHO=(-o BatchMode=yes -o ConnectTimeout=6)
 say() { printf '  %s\n' "$*"; }
 
 sudo true   # asks for the password once (sudo -v would insist on one even where sudo needs none)
-WORKER=$(sudo docker inspect spark-stack --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | sed -n 's/^STACK_WORKER=//p')
+WORKER=$(sudo docker inspect spark-stack --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | sed -n 's/^STACK_WORKER=//p' || true)
+[ -n "$WORKER" ] || ! [ -f /etc/netplan/40-spark-stack-cx7.yaml ] || WORKER="$(id -un)@192.168.100.11"   # the installer's worker address
 
 echo "Stopping models"
 for d in "$STACK_DIR"/vendor/*/; do
