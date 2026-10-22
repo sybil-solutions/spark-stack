@@ -186,7 +186,7 @@ DISK_SCAN = (
     "cd \"$HOME\" || exit 1; "
     f"for d in {' '.join(h + '/models--*' for h in HUBS)} {' '.join(EXTRA_DIRS)}; do "
     "  [ -d \"$d\" ] || continue; "
-    "  b=$(du -sb \"$d\" 2>/dev/null | cut -f1); "
+    "  b=$(du -s --block-size=1 \"$d\" 2>/dev/null | cut -f1); "   # allocated bytes: partial downloads can be sparse
     "  inc=$(find \"$d\" -name '*.incomplete' -print -quit 2>/dev/null); "
     "  printf '%s\\t%s\\t%s\\n' \"$d\" \"$b\" \"${inc:+partial}\"; "
     "done"
