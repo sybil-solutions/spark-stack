@@ -25,7 +25,7 @@ sudo docker rmi spark-stack:local >/dev/null 2>&1 || true
 sudo systemctl disable --now spark-stack-dsh.service >/dev/null 2>&1 || true
 sudo rm -f /etc/systemd/system/spark-stack-dsh.service && sudo systemctl daemon-reload
 sudo rm -rf /opt/spark-stack-node
-pkg=$(dpkg-query -W -f '${Package}\n' 'opencode*' 2>/dev/null | head -1)
+pkg=$(dpkg-query -W -f '${Package}\n' 'opencode*' 2>/dev/null | head -1 || true)
 [ -z "$pkg" ] || sudo DEBIAN_FRONTEND=noninteractive apt-get remove -y -qq "$pkg" >/dev/null 2>&1 || true
 rm -f ~/.local/share/applications/spark-stack.desktop ~/.local/share/applications/spark-dsh.desktop \
       ~/.local/share/icons/spark-stack.svg ~/.local/share/icons/spark-dsh.svg \
