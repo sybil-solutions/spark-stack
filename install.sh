@@ -93,14 +93,17 @@ link_peer() {   # the IPv6 link-local address of whatever is on the other end of
   ip -6 neigh show dev "$ifc" | awk '/^fe80/ && !/FAILED/ {print $1; exit}' | sed "s/\$/%$ifc/"
 }
 tailnet_sparks() {   # tailnet machines we can ssh to as $U without a password (Tailscale SSH) that have a CX7 link up
-  local peer h
+  local peer dir me
+  dir=$(mktemp -d); me=$(hostname)
   for peer in $(tailscale status --json 2>/dev/null | python3 -c 'import sys,json
 d=json.load(sys.stdin)
 print(" ".join(p["DNSName"].rstrip(".") for p in (d.get("Peer") or {}).values() if p.get("Online") and p.get("OS")=="linux"))'); do
-    h=$(ssh -n "${SSHO[@]}" -o ConnectTimeout=4 "$U@$peer" "ibdev2netdev 2>/dev/null | grep -q '(Up)' && hostname" 2>/dev/null) \
-      && [ -n "$h" ] && [ "$h" != "$(hostname)" ] && echo "$U@$peer"
+    ( h=$(timeout 15 ssh -n "${SSHO[@]}" -o ConnectTimeout=4 "$U@$peer" "ibdev2netdev 2>/dev/null | grep -q '(Up)' && hostname" 2>/dev/null) \
+        && [ -n "$h" ] && [ "$h" != "$me" ] && echo "$U@$peer" > "$dir/$peer" ) &
   done
-  return 0
+  wait
+  cat "$dir"/* 2>/dev/null || true
+  rm -rf "$dir"
 }
 
 BOOT=""   # how we reach the second Spark before its CX7 address exists
@@ -135,10 +138,10 @@ fi
 
 wsudo() {   # run a root script on the second Spark: sudo -n when it needs no password, else feed it the password
   if ssh -n "${SSHO[@]}" "$BOOT" sudo -n true 2>/dev/null; then   # -n: stdin is the script for the next ssh
-    ssh "${SSHO[@]}" "$BOOT" "sudo -n bash -s -- $*"
+    timeout 900 ssh "${SSHO[@]}" "$BOOT" "sudo -n bash -s -- $*"
   else
     [ -n "$PW" ] || die "the second Spark needs a sudo password; run this installer from a terminal"
-    { printf '%s\n' "$PW"; cat; } | ssh "${SSHO[@]}" "$BOOT" "sudo -S -p '' bash -s -- $*"
+    { printf '%s\n' "$PW"; cat; } | timeout 900 ssh "${SSHO[@]}" "$BOOT" "sudo -S -p '' bash -s -- $*"
   fi
 }
 
@@ -163,8 +166,7 @@ fi
 # ------------------------------------------------------------------------------------------------ both nodes
 step "System setup (sleep off, docker, CX7 link, model sharing)"
 if [ -n "$BOOT" ]; then
-  detach=""; [[ "$BOOT" != *%* ]] || detach="- - detach"
-  wsudo "$U worker ${WORKER_IPS[*]} $detach" < "$STACK_DIR/scripts/node-setup.sh"
+  wsudo "$U worker ${WORKER_IPS[*]}" < "$STACK_DIR/scripts/node-setup.sh"
   printf '%s\n' "$PW" | sudo -S -p '' bash "$STACK_DIR/scripts/node-setup.sh" "$U" head "${HEAD_IPS[@]}" "${WORKER_IPS[@]}"
   for i in $(seq 1 60); do ping -c1 -W1 "${WORKER_IPS[0]}" >/dev/null 2>&1 && break; sleep 1; done
   ssh "${SSHO[@]}" "$WORKER_TARGET" true || die "ssh to the second Spark over the CX7 link ($WORKER_TARGET) failed"

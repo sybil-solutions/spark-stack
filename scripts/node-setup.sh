@@ -3,8 +3,7 @@
 #   node-setup.sh <user> <role: head|worker|single> [<ip for the first CX7 twin> <ip for the second> [<peer ip> <peer ip>]]
 # Idempotent: re-running converges to the same state.
 set -euo pipefail
-U=$1 ROLE=$2 IP_A=${3:-} IP_B=${4:-} PEER_A=${5:-} PEER_B=${6:-} DETACH=${7:-}
-[ "$PEER_A" != - ] || PEER_A="" PEER_B=""
+U=$1 ROLE=$2 IP_A=${3:-} IP_B=${4:-} PEER_A=${5:-} PEER_B=${6:-}
 UHOME=$(getent passwd "$U" | cut -d: -f6)
 say() { printf '  [%s] %s\n' "$(hostname)" "$*"; }
 
@@ -44,7 +43,8 @@ say "sleep disabled (system targets masked, GNOME auto-suspend off)"
 if [ -n "$IP_A" ]; then
   mapfile -t UP < <(ibdev2netdev 2>/dev/null | awk '/\(Up\)/ {print $5}' | sort)
   [ "${#UP[@]}" -ge 2 ] || { echo "CX7 link is not up on $(hostname): $(ibdev2netdev | tr '\n' ' ')" >&2; exit 3; }
-  cat > /etc/netplan/40-spark-stack-cx7.yaml <<EOF
+  plan=$(mktemp)
+  cat > "$plan" <<EOF
 # Written by spark-stack: the QSFP link between the two Sparks.
 network:
   version: 2
@@ -58,11 +58,16 @@ network:
       dhcp4: false
       dhcp6: false
 EOF
-  chmod 600 /etc/netplan/40-spark-stack-cx7.yaml
-  if [ "$DETACH" = detach ]; then   # we were reached over this very link: apply after the ssh session has returned
-    setsid -f sh -c 'sleep 2; netplan apply' >/dev/null 2>&1
+  have=$(ip -4 -br addr show "${UP[0]}" 2>/dev/null)
+  if cmp -s "$plan" /etc/netplan/40-spark-stack-cx7.yaml && [[ "$have" == *"$IP_A/24"* ]]; then
+    rm -f "$plan"   # already in place: netplan apply would only bounce the Wi-Fi
   else
-    netplan apply 2>/dev/null
+    install -m 600 "$plan" /etc/netplan/40-spark-stack-cx7.yaml && rm -f "$plan"
+    if [ "$ROLE" = worker ]; then   # applied after this ssh session returns: netplan apply can bounce the link we came in on
+      setsid -f sh -c 'sleep 2; netplan apply' >/dev/null 2>&1
+    else
+      netplan apply 2>/dev/null
+    fi
   fi
   say "CX7 link: ${UP[0]}=$IP_A ${UP[1]}=$IP_B"
 fi
