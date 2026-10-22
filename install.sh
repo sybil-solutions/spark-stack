@@ -343,10 +343,14 @@ read -r DKEY DSPARKS < <(registry 'print(*DEFAULT_MODEL)')
 if [ "${NO_DOWNLOAD:-0}" = 1 ]; then
   info "skipped (NO_DOWNLOAD=1)"
 else
-  curl -fs -m 20 -X POST \
-    "http://$TS_IP:$PORT/api/models/$DKEY/prepare?sparks=$DSPARKS&start=true" >/dev/null \
-    && info "downloading $DKEY for $DSPARKS Spark(s); it starts by itself when the download is verified (watch it in Spark Stack)" \
-    || info "the download did not start (already running?); start it from Spark Stack"
+  if resp=$(curl -fs -m 20 -X POST "http://$TS_IP:$PORT/api/models/$DKEY/prepare?sparks=$DSPARKS&start=true"); then
+    case "$resp" in
+      *already*) info "$DKEY is already running" ;;
+      *) info "downloading $DKEY for $DSPARKS Spark(s); it starts by itself when the download is verified (watch it in Spark Stack)" ;;
+    esac
+  else
+    info "the download did not start (already running?); start it from Spark Stack"
+  fi
 fi
 
 printf '\n\033[1mDone.\033[0m\n'
