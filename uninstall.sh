@@ -31,6 +31,7 @@ rm -f ~/.local/share/applications/spark-stack.desktop ~/.local/share/application
       ~/.local/share/icons/spark-stack.svg ~/.local/share/icons/spark-dsh.svg \
       ~/.local/bin/spark-stack-open ~/.local/bin/spark-dsh-open
 rm -rf ~/.local/share/spark-stack/webapp
+grep -l 'spark-stack/opencode-data' ~/.local/share/applications/*.desktop 2>/dev/null | xargs -r rm -f   # OpenCode launcher copy
 uid=$(id -u)
 if [ -S "/run/user/$uid/bus" ]; then
   export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus"

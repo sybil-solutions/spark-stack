@@ -209,6 +209,14 @@ if [ "$(dpkg-query -W -f '${db:Status-Status} ${Version}' "$OC_PKG" 2>/dev/null)
 fi
 OC_DESKTOP=$(dpkg -L "$OC_PKG" | grep '/applications/.*\.desktop$' | head -1 | xargs -r basename || true)
 info "OpenCode $(dpkg-query -W -f '${Version}' "$OC_PKG") ($OC_DESKTOP)"
+# The desktop app keeps its own data folder: an OpenCode CLI of another major version (2.x rewrote the shared
+# ~/.local/share/opencode/opencode.db) makes desktop 1.19 stop at "Database is not empty and has no session table".
+# A user-level copy of its launcher, same file name, so the dock pin and the window class stay the same.
+if [ -n "$OC_DESKTOP" ] && [ -f "/usr/share/applications/$OC_DESKTOP" ]; then
+  mkdir -p ~/.local/share/applications ~/.local/share/spark-stack/opencode-data
+  sed "s|^Exec=|Exec=env XDG_DATA_HOME=$HOME/.local/share/spark-stack/opencode-data |" \
+    "/usr/share/applications/$OC_DESKTOP" > ~/.local/share/applications/"$OC_DESKTOP"
+fi
 
 # ------------------------------------------------------------------------------------------------ recipes
 step "Model recipes"
