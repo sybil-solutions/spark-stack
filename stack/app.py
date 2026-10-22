@@ -436,6 +436,9 @@ async def api_disk_remove(request: Request) -> dict:
     if ".." in path or not (in_hub or path in EXTRA_DIRS):
         raise HTTPException(400, "only model folders listed under Disk can be removed")
     repo = repo_of(path)
+    if not owners(repo, path):   # a cache shared by every download (e.g. Xet's): only when nothing downloads or runs
+        if any(busy(k) for k in MODELS):
+            raise HTTPException(409, "a download or model job is running; remove this after it finishes")
     for owner in owners(repo, path):
         key = owner.split(":")[0]
         if await run_in_threadpool(endpoint_up, MODELS[key].port) or busy(key):
