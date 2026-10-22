@@ -80,6 +80,6 @@ else
   say "model weights kept in ~/.cache (run with --weights to delete them)"
 fi
 
-rm -rf "$STATE"
+sudo rm -rf "$STATE"   # the app container writes its job logs there as root
 cd "$HOME" && rm -rf "$STACK_DIR"
 echo "Spark Stack removed."
