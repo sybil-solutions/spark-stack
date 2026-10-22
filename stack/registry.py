@@ -27,7 +27,9 @@ class Recipe:
 
     def command(self, script: str, worker: str, port: int) -> str:
         # HOST=127.0.0.1: the model's own API answers on the Spark only; the tailnet reaches it through the stack's /v1.
-        env = {"HOST": "127.0.0.1", **self.env}
+        # HF_HUB_DISABLE_XET=1: plain HTTPS from the CDN; on the GX10s' Wi-Fi Xet moved ~4 MB/s of files for ~13 MB/s
+        # received, plain HTTPS keeps up with the link.
+        env = {"HOST": "127.0.0.1", "HF_HUB_DISABLE_XET": "1", **self.env}
         if self.sparks == 2:
             env["WORKER"] = worker
         prefix = " ".join(f"{k}={v}" for k, v in env.items())
