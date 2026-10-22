@@ -5,7 +5,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends openssh-client curl ca-certificates procps tini \
  && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir "fastapi>=0.115" "uvicorn[standard]>=0.30" "httpx>=0.27"
+RUN pip install --no-cache-dir fastapi==0.159.1 starlette==1.9.0 pydantic==2.14.1 "uvicorn[standard]==0.54.0" httpx==0.28.1
 
 COPY stack /opt/spark-stack/stack
 COPY docker/entrypoint.sh /usr/local/bin/stack-entrypoint

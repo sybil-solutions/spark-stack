@@ -22,11 +22,12 @@ class Recipe:
     env: dict[str, str] = field(default_factory=dict)
     hf_cache: str = ".cache/huggingface"   # Hugging Face cache it uses, relative to $HOME
     prepare: str = "scripts/prepare.sh"
-    start: str = "PREPARE=0 PORT={port} ./start.sh"
+    start: str = "PORT={port} ./start.sh"   # PREPARE=auto: the recipe re-runs its own prepare unless its marker matches
     stop: str = "./stop.sh"
 
     def command(self, script: str, worker: str, port: int) -> str:
-        env = dict(self.env)
+        # HOST=127.0.0.1: the model's own API answers on the Spark only; the tailnet reaches it through the stack's /v1.
+        env = {"HOST": "127.0.0.1", **self.env}
         if self.sparks == 2:
             env["WORKER"] = worker
         prefix = " ".join(f"{k}={v}" for k, v in env.items())
@@ -95,7 +96,8 @@ MODELS: dict[str, Model] = {
                 dir="qwen-27b-1x",
                 repo=f"{MIA}/Qwen3.8-27B-DGX-Spark-TensorFold.git",
                 commit="c11ff138871cf43d12898d79dbfa4dc952d17ca4",
-                weights=("Vontra/Qwen3.8-27B-MLX-4bit", "z-lab/Qwen3.8-27B-DFlash2"),
+                weights=("TensorFold/Qwen3.8-27B-MLX-4bit", "z-lab/Qwen3.8-27B-DFlash2"),
+                env={"MODEL_ID": "TensorFold/Qwen3.8-27B-MLX-4bit"},   # the repo's current name (Vontra/... redirects)
                 size_gib=19,
                 decode="58 tok/s prose, 137 code",
             ),

@@ -57,27 +57,31 @@ if o.exists():
     o.write_text(json.dumps(c, indent=2) + "\n")
 PY
 
-undo_node() {   # root, on each Spark: sleep back on, NFS share off
-  cat <<'EOF'
-systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1
+UNDO_NODE='systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1
 rm -f /etc/dconf/db/local.d/00-spark-stack && dconf update 2>/dev/null || true
-if grep -q '# spark-stack$' /etc/exports 2>/dev/null; then sed -i '/# spark-stack$/d' /etc/exports; exportfs -ra; fi
-echo "  [$(hostname)] sleep restored, NFS share removed"
-EOF
-}
-undo_node | sudo bash
-if [ -n "$WORKER" ] && ssh "${SSHO[@]}" "$WORKER" sudo -n true 2>/dev/null; then
-  undo_node | ssh "${SSHO[@]}" "$WORKER" "sudo -n bash"
-  [ "$WEIGHTS" = 0 ] || ssh "${SSHO[@]}" "$WORKER" "rm -rf ~/.cache/huggingface/hub ~/.cache/spark-stack-hf ~/.cache/dsv41-tensorfold ~/.cache/huggingface/xet"
-elif [ -n "$WORKER" ]; then
-  say "second Spark ($WORKER): run 'sudo systemctl unmask sleep.target suspend.target' there to restore sleep"
+if grep -q "# spark-stack$" /etc/exports 2>/dev/null; then sed -i "/# spark-stack$/d" /etc/exports; exportfs -ra; fi
+echo "  [$(hostname)] sleep restored, NFS share removed"'
+# Only the folders the stack's recipes download; other models in your caches stay.
+WEIGHT_DIRS=$(cd "$STACK_DIR" && python3 -c 'from stack.registry import MODELS
+dirs = {".cache/spark-stack-hf", ".cache/dsv41-tensorfold"}
+for m in MODELS.values():
+    for r in m.recipes.values():
+        dirs.update(f"{r.hf_cache}/hub/models--{w.replace(chr(47), chr(45) * 2)}" for w in r.weights)
+print(" ".join(sorted(dirs)))')
+RM_WEIGHTS="cd \"\$HOME\" && rm -rf $WEIGHT_DIRS"
+
+sudo bash -c "$UNDO_NODE"
+if [ -n "$WORKER" ]; then
+  timeout 120 ssh -t -o ConnectTimeout=6 "$WORKER" "sudo bash -c '$UNDO_NODE'" \
+    || say "second Spark ($WORKER): run 'sudo systemctl unmask sleep.target suspend.target' there to restore sleep"
+  [ "$WEIGHTS" = 0 ] || timeout 600 ssh "${SSHO[@]}" "$WORKER" "$RM_WEIGHTS"
 fi
 
 if [ "$WEIGHTS" = 1 ]; then
-  echo "Removing model weights"
-  rm -rf ~/.cache/huggingface/hub ~/.cache/spark-stack-hf ~/.cache/dsv41-tensorfold ~/.cache/huggingface/xet
+  echo "Removing the stack's model weights"
+  bash -c "$RM_WEIGHTS"
 else
-  say "model weights kept in ~/.cache (run with --weights to delete them)"
+  say "model weights kept in ~/.cache (run with --weights to delete the stack's models)"
 fi
 
 sudo rm -rf "$STATE"   # the app container writes its job logs there as root

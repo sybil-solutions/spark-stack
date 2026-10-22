@@ -14,9 +14,9 @@ say "== state"
 api "$BASE/api/state" | python3 -c '
 import json,sys
 d=json.load(sys.stdin)
-for role,n in d["nodes"].items(): print(f"  {role:6} {n.get(\"host\",n[\"name\"])} {\"up\" if n[\"reachable\"] else \"DOWN\"} {n.get(\"mem_gib\")} GiB free")
+for role, n in d["nodes"].items(): print("  %-6s %s %s %s GiB free" % (role, n.get("host", n["name"]), "up" if n["reachable"] else "DOWN", n.get("mem_gib")))
 assert all(n["reachable"] for n in d["nodes"].values()), "a node is unreachable"
-for m in d["models"]: print(f"  {m[\"key\"]:10} {m[\"status\"]}")'
+for m in d["models"]: print("  %-10s %s" % (m["key"], m["status"]))'
 
 say "== start $MODEL on $SPARKS Spark(s)"
 api -X POST "$BASE/api/models/$MODEL/load?sparks=$SPARKS" >/dev/null || fail "load refused"

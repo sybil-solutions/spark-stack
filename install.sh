@@ -72,9 +72,9 @@ export SPARK_PW="$PW"
 # ------------------------------------------------------------------------------------------------ code
 step "Spark Stack code ($REF)"
 if [ -d "$STACK_DIR/.git" ]; then
-  git -C "$STACK_DIR" fetch -q origin "$REF" && git -C "$STACK_DIR" checkout -q -B "$REF" FETCH_HEAD
+  timeout 300 git -C "$STACK_DIR" fetch -q origin "$REF" && git -C "$STACK_DIR" checkout -q -B "$REF" FETCH_HEAD
 else
-  git clone -q --branch "$REF" "$REPO" "$STACK_DIR"
+  timeout 300 git clone -q --branch "$REF" "$REPO" "$STACK_DIR"
 fi
 info "$STACK_DIR at $(git -C "$STACK_DIR" rev-parse --short HEAD)"
 registry() { (cd "$STACK_DIR" && python3 -c "from stack.registry import MODELS, DEFAULT_MODEL
@@ -196,7 +196,7 @@ if [ "$("$NODE_DIR/bin/node" --version 2>/dev/null)" != "$NODE_VERSION" ]; then
   sudo rm -rf "$NODE_DIR" && sudo mv "$tmp/node-$NODE_VERSION-linux-arm64" "$NODE_DIR" && rm -rf "$tmp"
 fi
 if [ "$(PATH="$NODE_DIR/bin:$PATH" dsh --version 2>/dev/null | tail -1)" != "$DSH_VERSION" ]; then
-  sudo env PATH="$NODE_DIR/bin:$PATH" "$NODE_DIR/bin/npm" install -g --silent --no-fund --no-audit "@deepseek-ai/dsh@$DSH_VERSION" >/dev/null
+  sudo env PATH="$NODE_DIR/bin:$PATH" timeout 1200 "$NODE_DIR/bin/npm" install -g --silent --no-fund --no-audit "@deepseek-ai/dsh@$DSH_VERSION" >/dev/null
 fi
 info "DeepSeek harness $(PATH="$NODE_DIR/bin:$PATH" dsh --version 2>/dev/null | tail -1)"
 
@@ -205,7 +205,7 @@ OC_PKG=""
 [ -s "$OC_DEB" ] || fetch "https://github.com/anomalyco/opencode/releases/download/$OPENCODE_VERSION/opencode-desktop-linux-arm64.deb" "$OC_DEB"
 OC_PKG=$(dpkg-deb -f "$OC_DEB" Package)
 if [ "$(dpkg-query -W -f '${db:Status-Status} ${Version}' "$OC_PKG" 2>/dev/null)" != "installed $(dpkg-deb -f "$OC_DEB" Version)" ]; then
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$OC_DEB" >/dev/null 2>&1 || die "OpenCode install failed"
+  sudo DEBIAN_FRONTEND=noninteractive timeout 1200 apt-get install -y -qq "$OC_DEB" >/dev/null 2>&1 || die "OpenCode install failed"
 fi
 OC_DESKTOP=$(dpkg -L "$OC_PKG" | grep '/applications/.*\.desktop$' | head -1 | xargs -r basename || true)
 info "OpenCode $(dpkg-query -W -f '${Version}' "$OC_PKG") ($OC_DESKTOP)"
@@ -218,8 +218,8 @@ registry 'for m in MODELS.values():
         print(r.dir, r.repo, r.commit, r.sparks)' | while read -r dir repo commit sparks; do
   [ "$sparks" = 1 ] || [ -n "$BOOT" ] || continue
   d="$STACK_DIR/vendor/$dir"
-  [ -d "$d/.git" ] || git clone -q "$repo" "$d"
-  git -C "$d" cat-file -e "$commit^{commit}" 2>/dev/null || git -C "$d" fetch -q origin
+  [ -d "$d/.git" ] || timeout 600 git clone -q "$repo" "$d"
+  git -C "$d" cat-file -e "$commit^{commit}" 2>/dev/null || timeout 600 git -C "$d" fetch -q origin
   git -C "$d" -c advice.detachedHead=false checkout -q "$commit"
   info "$dir @ ${commit:0:8}"
 done
@@ -228,7 +228,7 @@ done
 step "Spark Stack app"
 mkdir -p "$STATE" && chmod 700 "$STATE"
 [ -s "$STATE/token" ] || { python3 -c 'import secrets; print(secrets.token_urlsafe(24))' > "$STATE/token"; chmod 600 "$STATE/token"; }
-sudo docker build -q -t "$IMAGE" "$STACK_DIR" >/dev/null
+timeout 1800 sudo docker build -q -t "$IMAGE" "$STACK_DIR" >/dev/null
 sudo docker rm -f spark-stack >/dev/null 2>&1 || true
 sudo docker run -d --name spark-stack --network host --restart unless-stopped \
   -v "$HOME:$HOME" -v "$STATE:/var/lib/spark-stack" \

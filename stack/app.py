@@ -59,6 +59,7 @@ TOKEN = resolve_token()
 app = FastAPI(title="spark stack")
 host = Host(HEAD, STATE_DIR)
 _state_lock = threading.Lock()
+_action_lock = threading.Lock()   # admission of prepare/load/unload: check and spawn as one step
 
 
 @app.middleware("http")
@@ -79,19 +80,25 @@ LOCAL_SOURCES = {"127.0.0.1", os.environ.get("STACK_BIND", "127.0.0.1")}   # a r
 
 # ------------------------------------------------------------------ state
 def load_state() -> dict:
-    if STATE_FILE.exists():
+    empty = {"active": None, "models": {}}
+    if not STATE_FILE.exists():
+        return empty
+    try:
         state = json.loads(STATE_FILE.read_text())
-        if isinstance(state.get("active"), str) or "models" not in state:   # pre-variant state file
-            return {"active": None, "models": {}}
-        return state
-    return {"active": None, "models": {}}
+    except (json.JSONDecodeError, OSError):
+        return empty   # a damaged file costs the remembered statuses only; the endpoints stay the truth
+    if isinstance(state.get("active"), str) or "models" not in state:   # pre-variant state file
+        return empty
+    return state
 
 
 def update_state(fn) -> dict:
     with _state_lock:
         state = load_state()
         fn(state)
-        STATE_FILE.write_text(json.dumps(state, indent=2))
+        tmp = STATE_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state, indent=2))
+        os.replace(tmp, STATE_FILE)
         return state
 
 
@@ -312,11 +319,12 @@ def api_state() -> dict:
 def api_prepare(key: str, sparks: int = 2) -> dict:
     m = model_or_404(key)
     r = recipe_or_400(m, sparks)
-    if busy(key):
-        raise HTTPException(409, f"{m.name}: {host.job(key).action} already running")
-    cmd = f"cd {recipe_path(r)} && {r.command(r.prepare, WORKER, m.port)}"
-    host.spawn(key, "prepare", cmd, timeout=12 * 3600)
-    set_model(key, status="downloading", sparks=sparks, last=f"download started {time.strftime('%H:%M:%S')}")
+    with _action_lock:
+        if busy(key):
+            raise HTTPException(409, f"{m.name}: {host.job(key).action} already running")
+        cmd = f"cd {recipe_path(r)} && {r.command(r.prepare, WORKER, m.port)}"
+        host.spawn(key, "prepare", cmd, timeout=12 * 3600)
+        set_model(key, status="downloading", sparks=sparks, last=f"download started {time.strftime('%H:%M:%S')}")
     _disk_cache.clear()
     return {"ok": True}
 
@@ -325,20 +333,22 @@ def api_prepare(key: str, sparks: int = 2) -> dict:
 def api_load(key: str, sparks: int = 2) -> dict:
     m = model_or_404(key)
     r = recipe_or_400(m, sparks)
-    active = active_entry()
-    if active and active["key"] != key and (endpoint_up(MODELS[active["key"]].port) or busy(active["key"])):
-        raise HTTPException(409, f"{MODELS[active['key']].name} is running; stop it first")
-    if busy(key):
-        raise HTTPException(409, f"{m.name}: {host.job(key).action} already running")
-    if endpoint_up(m.port):
-        set_active(key, load_state()["models"].get(key, {}).get("sparks", sparks))
-        return {"ok": True, "already": True}
-    # The recipe's start.sh downloads what is missing (PREPARE=auto) when the weights are not complete yet.
-    start = r.start if complete(r, scan_disk(HEAD, max_age=0)) else r.start.replace("PREPARE=0 ", "")
-    cmd = f"cd {recipe_path(r)} && {r.command(start, WORKER, m.port)}"
-    host.spawn(key, "load", cmd, timeout=4 * 3600)
-    set_active(key, sparks)
-    set_model(key, status="starting", sparks=sparks, last=f"start {time.strftime('%H:%M:%S')} on {sparks} Spark(s)")
+    with _action_lock:   # two clicks must never put two models on one GPU
+        for other in MODELS.values():
+            if other.key == key:
+                continue
+            job = host.job(other.key)
+            if endpoint_up(other.port) or (job and not job.done and job.action in ("load", "stop")):
+                raise HTTPException(409, f"{other.name} is running or changing; stop it first")
+        if busy(key):
+            raise HTTPException(409, f"{m.name}: {host.job(key).action} already running")
+        if endpoint_up(m.port):
+            set_active(key, load_state()["models"].get(key, {}).get("sparks", sparks))
+            return {"ok": True, "already": True}
+        cmd = f"cd {recipe_path(r)} && {r.command(r.start, WORKER, m.port)}"
+        host.spawn(key, "load", cmd, timeout=4 * 3600)
+        set_active(key, sparks)
+        set_model(key, status="starting", sparks=sparks, last=f"start {time.strftime('%H:%M:%S')} on {sparks} Spark(s)")
     return {"ok": True}
 
 
@@ -347,16 +357,17 @@ def api_unload(key: str) -> dict:
     m = model_or_404(key)
     sparks = load_state()["models"].get(key, {}).get("sparks") or max(m.recipes)
     r = m.recipe(sparks if sparks in m.recipes else max(m.recipes))
-    job = host.job(key)
-    if job and not job.done and job.action != "load":
-        raise HTTPException(409, f"{m.name}: {job.action} already running")
-    host.cancel(key)   # a start still waiting for the server: stop it, then run the recipe's stop
-    cmd = f"cd {recipe_path(r)} && {r.command(r.stop, WORKER, m.port)}"
-    host.spawn(key, "stop", cmd, timeout=900)
-    set_model(key, status="stopping")
-    active = active_entry()
-    if active and active["key"] == key:
-        set_active(None)
+    with _action_lock:
+        job = host.job(key)
+        if job and not job.done and job.action != "load":
+            raise HTTPException(409, f"{m.name}: {job.action} already running")
+        host.cancel(key)   # a start still waiting for the server: stop it, then run the recipe's stop
+        cmd = f"cd {recipe_path(r)} && {r.command(r.stop, WORKER, m.port)}"
+        host.spawn(key, "stop", cmd, timeout=900)
+        set_model(key, status="stopping")
+        active = active_entry()
+        if active and active["key"] == key:
+            set_active(None)
     return {"ok": True}
 
 
@@ -444,23 +455,25 @@ def model_list() -> dict:
 
 def resolve_target(requested: str | None):
     """Pick the model a request goes to: the one it names (optionally `<id>@1x` / `<id>@2x` for one recipe), or the
-    running one for the alias."""
+    running one for the alias. Returns (model, error, status)."""
     running = [m for m in MODELS.values() if endpoint_up(m.port)]
     if requested and requested != ALIAS:
         base, _, variant = requested.partition("@")
         named = next((m for m in MODELS.values() if base in (m.api_id, m.key, m.name)), None)
-        if named:
-            want = int(variant[0]) if re.fullmatch(r"[12]x", variant) else None
-            have = load_state()["models"].get(named.key, {}).get("sparks")
-            if named in running and (want is None or want == have):
-                return named, None
-            if named in running:
-                return None, f"{named.name} is running on {have} Spark(s), not {want}. Use '{named.api_id}' or restart it on {want}."
-            hint = f" ({running[0].name} is running; pick it or '{ALIAS}')" if running else ""
-            return None, f"{named.name} is not running. Start it in Spark Stack{hint}."
+        if not named:
+            known = ", ".join([ALIAS] + [m.api_id for m in MODELS.values()])
+            return None, f"Unknown model '{requested}'. Use one of: {known}.", 404
+        want = int(variant[0]) if re.fullmatch(r"[12]x", variant) else None
+        have = load_state()["models"].get(named.key, {}).get("sparks")
+        if named in running and (want is None or want == have):
+            return named, None, 200
+        if named in running:
+            return None, f"{named.name} is running on {have} Spark(s), not {want}. Use '{named.api_id}' or restart it on {want}.", 503
+        hint = f" ({running[0].name} is running; pick it or '{ALIAS}')" if running else ""
+        return None, f"{named.name} is not running. Start it in Spark Stack{hint}.", 503
     if running:
-        return running[0], None
-    return None, "No model is running. Open Spark Stack and press Start on a model."
+        return running[0], None, 200
+    return None, "No model is running. Open Spark Stack and press Start on a model.", 503
 
 
 def openai_error(message: str, status: int = 503) -> JSONResponse:
@@ -482,17 +495,22 @@ async def v1_proxy(path: str, request: Request):
         except json.JSONDecodeError:
             payload = None
     requested = payload.get("model") if isinstance(payload, dict) else None
-    target, error = await run_in_threadpool(resolve_target, requested)
+    target, error, status = await run_in_threadpool(resolve_target, requested)
     if not target:
-        return openai_error(error)
+        return openai_error(error, status)
     if isinstance(payload, dict):
         payload["model"] = target.api_id
         raw = json.dumps(payload).encode()
     url = f"http://{PROBE_HOST}:{target.port}/v1/{path}"
     headers = {"content-type": request.headers.get("content-type", "application/json")}
-    client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10))
-    upstream = await client.send(client.build_request(request.method, url, content=raw, headers=headers,
-                                                      params=request.query_params), stream=True)
+    # read: the longest silence allowed between bytes (a very long prompt can take minutes before the first token)
+    client = httpx.AsyncClient(timeout=httpx.Timeout(connect=10, read=900, write=60, pool=10))
+    try:
+        upstream = await client.send(client.build_request(request.method, url, content=raw, headers=headers,
+                                                          params=request.query_params), stream=True)
+    except httpx.HTTPError as exc:
+        await client.aclose()
+        return openai_error(f"{target.name} did not answer ({type(exc).__name__}); check its log in Spark Stack.")
 
     async def body():
         try:

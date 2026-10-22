@@ -14,13 +14,13 @@ pkgs="rsync curl git"
 missing=$(for p in $pkgs; do dpkg -s "$p" >/dev/null 2>&1 || echo "$p"; done)
 if [ -n "$missing" ]; then
   say "installing: $(echo $missing)"
-  DEBIAN_FRONTEND=noninteractive apt-get update -qq
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $missing >/dev/null
+  DEBIAN_FRONTEND=noninteractive timeout 600 apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive timeout 1200 apt-get install -y -qq $missing >/dev/null
 fi
 
 # ---- docker without sudo for the desktop user (the recipes call docker as that user)
 id -nG "$U" | grep -qw docker || { usermod -aG docker "$U"; say "added $U to the docker group"; }
-systemctl enable --now docker >/dev/null 2>&1 || true
+timeout 60 systemctl enable --now docker >/dev/null 2>&1 || true
 
 # ---- never sleep: a sleeping Spark drops its model and its tailnet address
 systemctl mask --now sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1
@@ -66,7 +66,7 @@ EOF
     if [ "$ROLE" = worker ]; then   # applied after this ssh session returns: netplan apply can bounce the link we came in on
       setsid -f sh -c 'sleep 2; netplan apply' >/dev/null 2>&1
     else
-      netplan apply 2>/dev/null
+      timeout 120 netplan apply 2>/dev/null
     fi
   fi
   say "CX7 link: ${UP[0]}=$IP_A ${UP[1]}=$IP_B"
@@ -80,11 +80,11 @@ if [ "$ROLE" = head ] && [ -n "$PEER_A" ]; then
   chmod 755 "$share" "$share/hub"
   sed -i '/# spark-stack$/d' /etc/exports
   echo "$share $PEER_A(ro,root_squash,no_subtree_check) $PEER_B(ro,root_squash,no_subtree_check) # spark-stack" >> /etc/exports
-  systemctl enable --now nfs-kernel-server >/dev/null 2>&1
-  exportfs -ra
+  timeout 120 systemctl enable --now nfs-kernel-server >/dev/null 2>&1
+  timeout 60 exportfs -ra
   say "NFS: $share exported read-only to $PEER_A $PEER_B"
 fi
 
 # ---- sshd must answer on the link (the recipes ssh to the worker's CX7 address)
-systemctl enable --now ssh.socket >/dev/null 2>&1 || systemctl enable --now ssh >/dev/null 2>&1 || true
+timeout 60 systemctl enable --now ssh.socket >/dev/null 2>&1 || timeout 60 systemctl enable --now ssh >/dev/null 2>&1 || true
 say "node ready ($ROLE)"
