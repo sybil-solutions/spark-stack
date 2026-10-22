@@ -26,8 +26,9 @@ measurements.
 | GLM-5.3-Flash (320B-A18B, vision) | not offered (2-bit only, 10-25 tok/s) | [EXL3-2x-DGX-Sparks-TensorFold](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks-TensorFold): 60 prose, 115 structured | 166 GiB | 8888 |
 | DeepSeek-V4.1-Flash-1017 | does not fit | [1017-2x-DGX-Sparks](https://github.com/MiaAI-Lab/DeepSeek-v4.1-Flash-1017-2x-DGX-Sparks): 75 prose, 110 code | 385 GiB | 8890 |
 
-Install starts the Qwen3.8-Flash-Next download (two-Spark build, or the one-Spark build on a single Spark). Everything
-else downloads when someone presses **Download** or **Start**. One model runs at a time.
+Install downloads Qwen3.8-Flash-Next (two-Spark build, or the one-Spark build on a single Spark) and starts it as soon
+as the download is verified. Everything else downloads when someone presses **Download** or **Start**. One model runs
+at a time. A start takes about 70 seconds once the weights are on disk.
 
 ## What the installer does
 
@@ -65,7 +66,7 @@ that model and gets a clear `503` when it is not running.
 | method | path | purpose |
 |---|---|---|
 | GET | `/api/state` | machines, models, download progress, what is running |
-| POST | `/api/models/{key}/prepare?sparks=1\|2` | download |
+| POST | `/api/models/{key}/prepare?sparks=1\|2[&start=true]` | download (`start=true`: then start it) |
 | POST | `/api/models/{key}/load?sparks=1\|2` | start (downloads what is missing first) |
 | POST | `/api/models/{key}/unload` | stop |
 | GET | `/api/models/{key}/logs` | the job log |

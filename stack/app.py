@@ -367,16 +367,30 @@ def api_state() -> dict:
 
 
 @app.post("/api/models/{key}/prepare")
-def api_prepare(key: str, sparks: int = 2) -> dict:
+def api_prepare(key: str, sparks: int = 2, start: bool = False) -> dict:
+    """Download and verify on both Sparks. start=true: then start it (the installer's first model), unless another
+    model is running or changing by then."""
     m = model_or_404(key)
     r = recipe_or_400(m, sparks)
+    if start and endpoint_up(m.port):
+        return {"ok": True, "already": True}   # an installer re-run while the model serves: nothing to do
     with _action_lock:
         if busy(key):
             raise HTTPException(409, f"{m.name}: {busy_action(key)} already running")
         cmd = f"cd {recipe_path(r)} && {r.command(r.prepare, WORKER, m.port)}"
-        host.spawn(key, "prepare", cmd, timeout=12 * 3600)
+        job = host.spawn(key, "prepare", cmd, timeout=12 * 3600)
         set_model(key, status="downloading", sparks=sparks, last=f"download started {time.strftime('%H:%M:%S')}")
     _disk_cache.clear()
+    if start:
+        def start_when_ready() -> None:
+            while not job.done:   # set by the job's reaper when its ssh exits
+                time.sleep(10)
+            if job.rc == 0:
+                try:
+                    api_load(key, sparks)
+                except HTTPException:
+                    pass
+        threading.Thread(target=start_when_ready, daemon=True, name=f"start-{key}").start()
     return {"ok": True}
 
 

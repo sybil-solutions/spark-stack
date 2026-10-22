@@ -344,8 +344,8 @@ if [ "${NO_DOWNLOAD:-0}" = 1 ]; then
   info "skipped (NO_DOWNLOAD=1)"
 else
   curl -fs -m 20 -X POST \
-    "http://$TS_IP:$PORT/api/models/$DKEY/prepare?sparks=$DSPARKS" >/dev/null \
-    && info "downloading $DKEY for $DSPARKS Spark(s); watch it in Spark Stack" \
+    "http://$TS_IP:$PORT/api/models/$DKEY/prepare?sparks=$DSPARKS&start=true" >/dev/null \
+    && info "downloading $DKEY for $DSPARKS Spark(s); it starts by itself when the download is verified (watch it in Spark Stack)" \
     || info "the download did not start (already running?); start it from Spark Stack"
 fi
 
