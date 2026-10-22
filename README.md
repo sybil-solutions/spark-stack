@@ -48,9 +48,13 @@ else downloads when someone presses **Download** or **Start**. One model runs at
 
 ## The app
 
-`http://<tailscale-ip>:8099`. On the Spark itself it opens without a key; from another tailnet machine paste the key
-from `~/spark-stack-state/token` once. Each model card has a **1 Spark / 2 Sparks** choice, **Download** with a
+**Spark Stack** in the dock opens it in its own window (`desktop/webapp.py`, GTK WebKit; **DeepSeek Harness** opens the
+same way, already signed in). From another tailnet machine it is `http://<tailscale-ip>:8099`: paste the key from
+`~/spark-stack-state/token` once. Each model card has a **1 Spark / 2 Sparks** choice, **Download** with a
 progress bar, **Start/Stop**, and the live log. **Disk** lists the model folders on both Sparks with a **Remove** button.
+
+After a reboot or power cut, the model that was running starts again by itself (for a two-Spark model, once the second
+Spark is back). **Stop** opts out: a stopped model stays stopped.
 
 ## One API for every app
 

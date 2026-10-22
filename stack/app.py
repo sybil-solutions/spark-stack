@@ -2,6 +2,8 @@
 
 Also serves one OpenAI-compatible front door at /v1 that forwards to whichever model is running, so the harnesses
 (DeepSeek harness, OpenCode) are configured once and follow the model picked in the UI.
+
+After a reboot or power cut the model that was running comes back by itself (resume_active); Stop opts out.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import shlex
 import subprocess
 import threading
 import time
+from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -56,7 +59,16 @@ def resolve_token() -> str:
 
 
 TOKEN = resolve_token()
-app = FastAPI(title="spark stack")
+RESUME_WAIT_S = 900   # after a boot, how long to wait for the worker before giving up on restarting the model
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    threading.Thread(target=resume_active, daemon=True, name="resume").start()
+    yield
+
+
+app = FastAPI(title="spark stack", lifespan=lifespan)
 host = Host(HEAD, STATE_DIR)
 _state_lock = threading.Lock()
 _action_lock = threading.Lock()   # admission of prepare/load/unload: check and spawn as one step
@@ -409,6 +421,31 @@ def api_unload(key: str) -> dict:
         if active and active["key"] == key:
             set_active(None)
     return {"ok": True}
+
+
+def resume_active() -> None:
+    """Start the model that was running before this controller started (a reboot or power cut), once.
+
+    Nothing happens when nobody had a model running, when it pressed Stop (that clears "active"), when the model
+    still answers (a controller restart) or when a recipe job is still at work. A two-Spark model waits up to
+    RESUME_WAIT_S for the worker to boot too."""
+    active = active_entry()
+    m = MODELS.get(active["key"]) if active else None
+    if not m or active.get("sparks") not in m.recipes:
+        return
+    deadline = time.time() + RESUME_WAIT_S
+    while time.time() < deadline:
+        if endpoint_up(m.port) or busy(m.key):
+            return
+        if active["sparks"] == 1 or (two_sparks() and node_facts(WORKER).get("reachable")):
+            try:
+                api_load(m.key, active["sparks"])
+                set_model(m.key, last=f"restarted after boot {time.strftime('%H:%M:%S')}")
+            except HTTPException:
+                pass   # another model is up or changing: leave it
+            return
+        time.sleep(15)
+
 
 
 @app.get("/api/models/{key}/logs")
