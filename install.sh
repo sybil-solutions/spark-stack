@@ -50,6 +50,7 @@ set -E
 main() {   # the whole run lives in one function: bash reads it completely before ssh can swallow a piped script
 [ "$(id -u)" -ne 0 ] || die "run this as your normal desktop user, not root (it asks for your password)"
 [ "$(uname -m)" = aarch64 ] || die "this installer is for DGX Spark / GB10 systems (arm64)"
+cd "$HOME"
 for c in nvidia-smi docker git curl python3 ssh; do command -v "$c" >/dev/null || die "$c is missing"; done
 TS_IP=$(tailscale ip -4 2>/dev/null | head -1 || true)
 [ -n "$TS_IP" ] || die "Tailscale is not connected. Run 'sudo tailscale up' first (see the guide, section Tailscale)."
