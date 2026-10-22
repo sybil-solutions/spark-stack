@@ -203,7 +203,7 @@ OC_DEB=/tmp/opencode-desktop-$OPENCODE_VERSION-arm64.deb
 OC_PKG=""
 [ -s "$OC_DEB" ] || fetch "https://github.com/anomalyco/opencode/releases/download/$OPENCODE_VERSION/opencode-desktop-linux-arm64.deb" "$OC_DEB"
 OC_PKG=$(dpkg-deb -f "$OC_DEB" Package)
-if [ "$(dpkg-query -W -f '${Version}' "$OC_PKG" 2>/dev/null)" != "$(dpkg-deb -f "$OC_DEB" Version)" ]; then
+if [ "$(dpkg-query -W -f '${db:Status-Status} ${Version}' "$OC_PKG" 2>/dev/null)" != "installed $(dpkg-deb -f "$OC_DEB" Version)" ]; then
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$OC_DEB" >/dev/null 2>&1 || die "OpenCode install failed"
 fi
 OC_DESKTOP=$(dpkg -L "$OC_PKG" | grep '/applications/.*\.desktop$' | head -1 | xargs -r basename || true)
