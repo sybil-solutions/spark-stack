@@ -242,13 +242,17 @@ def complete(recipe, entries: list[dict]) -> bool:
 
 
 # ------------------------------------------------------------------ status
-def derive_status(entry: dict, up: bool, job) -> str:
-    """The endpoint is the truth: a finished load that answers is running, a finished stop that is down is stopped."""
+def derive_status(entry: dict, up: bool, job, alive: str | None = None) -> str:
+    """The endpoint is the truth: a finished load that answers is running, a finished stop that is down is stopped.
+    `alive` is a recipe job still running on the head that this controller did not start (e.g. before a restart)."""
     status = entry.get("status", "absent")
+    labels = {"prepare": "downloading", "load": "starting", "stop": "stopping"}
     if up:
         return "running"
     if job and not job.done:
-        return {"prepare": "downloading", "load": "starting", "stop": "stopping"}.get(job.action, status)
+        return labels.get(job.action, status)
+    if alive:
+        return labels[alive]
     if job and job.done:
         if job.action == "prepare":
             return "ready" if job.rc == 0 else "error"
@@ -256,6 +260,8 @@ def derive_status(entry: dict, up: bool, job) -> str:
             return "error"
         if job.action == "stop":
             return "ready"
+    if status == "downloading":
+        return "absent"   # a download that is no longer running: Download resumes it
     return "ready" if status in ("running", "starting", "stopping") else status
 
 
@@ -263,9 +269,41 @@ def recipe_path(recipe) -> str:
     return f"{RECIPE_ROOT}/{recipe.dir}"
 
 
+_procs_cache: tuple[float, dict[str, str]] = (0.0, {})
+
+
+def recipe_procs(max_age: float = 5.0) -> dict[str, str]:
+    """Recipe jobs alive on the head, ours or left by an earlier controller: model key -> prepare | load | stop."""
+    global _procs_cache
+    if time.time() - _procs_cache[0] < max_age:
+        return _procs_cache[1]
+    _, out = host.run("pgrep -af 'spark-stack/vendor/' || true", timeout=10)
+    found: dict[str, str] = {}
+    for line in out.splitlines():
+        if "pgrep" in line:
+            continue
+        for m in MODELS.values():
+            for r in m.recipes.values():
+                if f"/vendor/{r.dir} " not in line:
+                    continue
+                if r.prepare in line:
+                    found[m.key] = "prepare"
+                elif r.stop in line:
+                    found[m.key] = "stop"
+                elif "start.sh" in line:
+                    found[m.key] = "load"
+    _procs_cache = (time.time(), found)
+    return found
+
+
 def busy(key: str) -> bool:
     job = host.job(key)
-    return bool(job and not job.done)
+    return bool(job and not job.done) or key in recipe_procs(max_age=0)
+
+
+def busy_action(key: str) -> str:
+    job = host.job(key)
+    return job.action if job and not job.done else recipe_procs().get(key, "a job")
 
 
 def active_entry() -> dict | None:
@@ -275,6 +313,7 @@ def active_entry() -> dict | None:
 @app.get("/api/state")
 def api_state() -> dict:
     state = load_state()
+    procs = recipe_procs()
     with ThreadPoolExecutor(max_workers=3) as pool:
         fut_nodes = pool.submit(nodes)
         fut_disk = pool.submit(scan_disk, HEAD)
@@ -301,7 +340,7 @@ def api_state() -> dict:
         models.append({
             "key": key, "name": m.name, "blurb": m.blurb, "port": m.port, "api_id": m.api_id,
             "context": m.context, "vision": m.vision,
-            "status": derive_status(entry, up[key], job),
+            "status": derive_status(entry, up[key], job, procs.get(key)),
             "sparks": entry.get("sparks"),
             "job": None if not job else {"action": job.action, "started": job.started, "done": job.done, "rc": job.rc},
             "last": entry.get("last"),
@@ -321,7 +360,7 @@ def api_prepare(key: str, sparks: int = 2) -> dict:
     r = recipe_or_400(m, sparks)
     with _action_lock:
         if busy(key):
-            raise HTTPException(409, f"{m.name}: {host.job(key).action} already running")
+            raise HTTPException(409, f"{m.name}: {busy_action(key)} already running")
         cmd = f"cd {recipe_path(r)} && {r.command(r.prepare, WORKER, m.port)}"
         host.spawn(key, "prepare", cmd, timeout=12 * 3600)
         set_model(key, status="downloading", sparks=sparks, last=f"download started {time.strftime('%H:%M:%S')}")
@@ -338,10 +377,11 @@ def api_load(key: str, sparks: int = 2) -> dict:
             if other.key == key:
                 continue
             job = host.job(other.key)
-            if endpoint_up(other.port) or (job and not job.done and job.action in ("load", "stop")):
+            if endpoint_up(other.port) or (job and not job.done and job.action in ("load", "stop")) \
+                    or recipe_procs().get(other.key) in ("load", "stop"):
                 raise HTTPException(409, f"{other.name} is running or changing; stop it first")
         if busy(key):
-            raise HTTPException(409, f"{m.name}: {host.job(key).action} already running")
+            raise HTTPException(409, f"{m.name}: {busy_action(key)} already running")
         if endpoint_up(m.port):
             set_active(key, load_state()["models"].get(key, {}).get("sparks", sparks))
             return {"ok": True, "already": True}
