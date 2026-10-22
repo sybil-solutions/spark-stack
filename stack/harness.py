@@ -18,6 +18,9 @@ from .registry import MODELS
 BEGIN = "# >>> spark-stack providers (managed by spark-stack install.sh)"
 END = "# <<< spark-stack providers"
 ALIAS = "spark"
+# dsh's OpenAI route refuses to send a request without a key ("No API key for provider"), though /v1 needs none.
+# The provider names this variable; install.sh's spark-stack-dsh unit sets it to a placeholder.
+KEY_ENV = "SPARK_STACK_API_KEY"
 
 
 def models() -> list[dict]:
@@ -37,6 +40,7 @@ def dsh_block(base_url: str) -> str:
              "        displayName: Spark Stack (local)",
              "        api: openai-completions",
              f"        baseURL: {base_url}",
+             f"        apiKeyEnv: {KEY_ENV}",
              "        models:"]
     for m in models():
         lines += [f"          - id: {m['id']}",

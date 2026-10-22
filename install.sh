@@ -261,6 +261,7 @@ After=network-online.target
 User=$U
 WorkingDirectory=$HOME
 Environment=PATH=$NODE_DIR/bin:/usr/local/bin:/usr/bin:/bin
+Environment=SPARK_STACK_API_KEY=spark-stack-no-key
 ExecStart=$NODE_DIR/bin/dsh web --port 3080 --no-open
 StandardOutput=append:$HOME/.local/state/spark-stack/dsh-web.log
 StandardError=append:$HOME/.local/state/spark-stack/dsh-web.log
